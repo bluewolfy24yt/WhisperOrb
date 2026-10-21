@@ -1,0 +1,82 @@
+name: Build & Release WhisperOrb (.ipa)
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-ipa:
+    name: Compile Unsigned iPadOS/iOS IPA on macOS 15
+    runs-on: macos-15
+    steps:
+      - name: 1. Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 2. Install XcodeGen
+        run: |
+          if ! command -v xcodegen &> /dev/null; then
+            brew install xcodegen
+          fi
+
+      - name: 3. Generate Xcode Project via XcodeGen
+        run: xcodegen generate
+
+      - name: 4. Resolve Swift Package Dependencies
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project WhisperOrb.xcodeproj \
+            -scheme WhisperOrbApp
+
+      - name: 5. Build Release for iphoneos (Unsigned / Ad-Hoc)
+        run: |
+          xcodebuild build \
+            -project WhisperOrb.xcodeproj \
+            -scheme WhisperOrbApp \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build_output \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES \
+            COMPILER_INDEX_STORE_ENABLE=NO
+
+      - name: 6. Package .app into WhisperOrb-iPad.ipa
+        run: |
+          mkdir -p Payload
+          APP_PATH=$(find build_output -name "WhisperOrbApp.app" -type d | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            echo "Erreur : WhisperOrbApp.app introuvable !"
+            exit 1
+          fi
+          cp -R "$APP_PATH" Payload/
+          zip -r9 WhisperOrb-iPad.ipa Payload
+          ls -lh WhisperOrb-iPad.ipa
+
+      - name: 7. Upload IPA as Workflow Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WhisperOrb-iPad-IPA
+          path: WhisperOrb-iPad.ipa
+          if-no-files-found: error
+
+      - name: 8. Publish Automatic GitHub Release (latest)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: "WhisperOrb iPadOS/iOS v1.0.${{ github.run_number }} (Build Auto)"
+          body: |
+            ## 🫧 WhisperOrb — Dictée Vocale Hors-Ligne (iPad Pro & iPhone)
+            
+            ### 📥 Installation rapide :
+            1. Téléchargez le fichier **`WhisperOrb-iPad.ipa`** ci-dessous.
+            2. Installez-le sur votre iPad ou iPhone via **SideStore**, **AltStore** ou **Sideloadly**.
+            3. Ouvrez **WhisperOrb**, téléchargez le modèle **Whisper Expert** (ou **Whisper PRO**), puis activez le clavier dans *Réglages > Général > Clavier > Claviers > Ajouter un clavier > WhisperOrb (Autoriser l'accès complet)*.
+          files: WhisperOrb-iPad.ipa
+          draft: false
+          prerelease: false
+          make_latest: true
