@@ -169,8 +169,8 @@ enum class WhisperModelTier(
         fileName = "ggml-medium-q5_0.bin",
         sizeMB = 539,
         ramUsageMB = 900,
-        minimumRequiredRAMGB = 5.4,
-        requiredRAMBadgeText = "6 Go+ RAM",
+        minimumRequiredRAMGB = 3.6,
+        requiredRAMBadgeText = "4 Go+ RAM",
         latencyDescription = "~0,68 s"
     ),
     ZERO_FAUTE(
@@ -181,8 +181,8 @@ enum class WhisperModelTier(
         fileName = "ggml-large-v3-turbo-q5_0.bin",
         sizeMB = 540,
         ramUsageMB = 950,
-        minimumRequiredRAMGB = 5.4,
-        requiredRAMBadgeText = "6 Go+ RAM",
+        minimumRequiredRAMGB = 3.6,
+        requiredRAMBadgeText = "4 Go+ RAM",
         latencyDescription = "~0,52 s"
     ),
     EXPERT_PLUS(
@@ -220,6 +220,107 @@ enum class WhisperModelTier(
     }
 }
 
+// MARK: - Easter Egg : Séquence des 7 Avertissements Progressifs (FR & EN)
+
+data class EasterEggUnlockStep(
+    val stepNumber: Int,
+    val titleFR: String,
+    val messageFR: String,
+    val confirmButtonFR: String,
+    val cancelButtonFR: String,
+    val titleEN: String,
+    val messageEN: String,
+    val confirmButtonEN: String,
+    val cancelButtonEN: String
+) {
+    fun localizedTitle(isEnglish: Boolean): String = if (isEnglish) titleEN else titleFR
+    fun localizedMessage(isEnglish: Boolean): String = if (isEnglish) messageEN else messageFR
+    fun localizedConfirm(isEnglish: Boolean): String = if (isEnglish) confirmButtonEN else confirmButtonFR
+    fun localizedCancel(isEnglish: Boolean): String = if (isEnglish) cancelButtonEN else cancelButtonFR
+
+    companion object {
+        val allSteps: List<EasterEggUnlockStep> = listOf(
+            EasterEggUnlockStep(
+                stepNumber = 1,
+                titleFR = "⚠️ ATTENTION : ÊTES-VOUS SÛR ?",
+                messageFR = "AVERTISSEMENT SYSTÈME CRITIQUE : Débloquer les modèles géants (Expert+ Q8 & TITAN 1,08 Go) sur un appareil non certifié risque de saturer la mémoire vive (RAM) et de provoquer l'arrêt immédiat du clavier par le système.",
+                confirmButtonFR = "Oui, je suis sûr",
+                cancelButtonFR = "Annuler (Prudent)",
+                titleEN = "⚠️ WARNING: ARE YOU SURE?",
+                messageEN = "CRITICAL SYSTEM WARNING: Unlocking giant AI models (Expert+ Q8 & TITAN 1.08 GB) on an uncertified device may saturate physical RAM and cause the OS to immediately terminate the keyboard.",
+                confirmButtonEN = "Yes, I am sure",
+                cancelButtonEN = "Cancel (Safe)"
+            ),
+            EasterEggUnlockStep(
+                stepNumber = 2,
+                titleFR = "🚨 Vraiment sûr de chez sûr ?",
+                messageFR = "Sérieusement, Whisper TITAN consomme plus de 2,1 Go de RAM brute à lui tout seul. Si ton téléphone a peu de mémoire libre, il va transpirer fort.",
+                confirmButtonFR = "Continuer quand même",
+                cancelButtonFR = "Bon, j'arrête",
+                titleEN = "🚨 Really, positively sure?",
+                messageEN = "Seriously, Whisper TITAN consumes over 2.1 GB of raw RAM all by itself. If your phone is low on memory, it's going to sweat bullets.",
+                confirmButtonEN = "Continue anyway",
+                cancelButtonEN = "Okay, I'll stop"
+            ),
+            EasterEggUnlockStep(
+                stepNumber = 3,
+                titleFR = "🤨 Tu cherches les problèmes ?",
+                messageFR = "On a codé une sécurité exprès anti-idiots comme toi pour protéger ton téléphone, et toi tu forces le passage ? C'est courageux mais un peu téméraire.",
+                confirmButtonFR = "J'aime le danger",
+                cancelButtonFR = "Tu as raison, stop",
+                titleEN = "🤨 Looking for trouble?",
+                messageEN = "We coded an anti-idiot safety lock specifically for people like you to protect your phone, and you're still forcing your way through? Brave, but reckless.",
+                confirmButtonEN = "I like danger",
+                cancelButtonEN = "You're right, stop"
+            ),
+            EasterEggUnlockStep(
+                stepNumber = 4,
+                titleFR = "🍳 Ton processeur va faire grille-pain",
+                messageFR = "Si ton téléphone commence à chauffer au point de pouvoir faire cuire un œuf sur l'écran pendant que tu dictes un SMS, faudra pas venir te plaindre !",
+                confirmButtonFR = "J'ai faim, vas-y",
+                cancelButtonFR = "J'abandonne",
+                titleEN = "🍳 Your CPU might turn into a toaster",
+                messageEN = "If your phone gets hot enough to fry an egg on the screen while you're dictating a text message, don't come crying to us!",
+                confirmButtonEN = "I'm hungry, go on",
+                cancelButtonEN = "I give up"
+            ),
+            EasterEggUnlockStep(
+                stepNumber = 5,
+                titleFR = "😤 Mais t'es têtu en fait !",
+                messageFR = "C'est déjà le 5ème avertissement ! 99 % des humains normaux auraient déjà cliqué sur « Annuler » depuis longtemps. Pourquoi tu t'acharnes comme ça ?",
+                confirmButtonFR = "Je ne lâche rien",
+                cancelButtonFR = "Ok j'arrête",
+                titleEN = "😤 You are insanely stubborn!",
+                messageEN = "This is the 5th warning already! 99% of normal humans would have clicked 'Cancel' a long time ago. Why are you so relentless?",
+                confirmButtonEN = "I never back down",
+                cancelButtonEN = "Ok I'll stop"
+            ),
+            EasterEggUnlockStep(
+                stepNumber = 6,
+                titleFR = "🫣 Avant-dernière chance...",
+                messageFR = "Après ce bouton, il n'y a plus de retour en arrière (enfin si, un simple switch, mais avoue que c'est dramatique). Tu persistes et signes ?",
+                confirmButtonFR = "JE PERSISTE !",
+                cancelButtonFR = "Pitié, annule",
+                titleEN = "🫣 Second-to-last chance...",
+                messageEN = "After this button, there is no turning back (well, actually there's a toggle switch, but admit it sounds dramatic). Do you still insist?",
+                confirmButtonEN = "I INSIST!",
+                cancelButtonEN = "Have mercy, cancel"
+            ),
+            EasterEggUnlockStep(
+                stepNumber = 7,
+                titleFR = "🤷‍♂️ Bon bah tant pis pour toi...",
+                messageFR = "Bon bah tant pis pour toi... Tous les modèles (jusqu'à Whisper TITAN 1,08 Go) sont maintenant débloqués ! Amuse-toi bien.",
+                confirmButtonFR = "DÉBLOQUER TOUT 🔓",
+                cancelButtonFR = "Finalement non",
+                titleEN = "🤷‍♂️ Well, too bad for you then...",
+                messageEN = "Well, too bad for you then... All models (all the way up to Whisper TITAN 1.08 GB) are now unlocked! Have fun.",
+                confirmButtonEN = "UNLOCK EVERYTHING 🔓",
+                cancelButtonEN = "Actually no"
+            )
+        )
+    }
+}
+
 object HardwareDetector {
     fun getPhysicalMemoryGB(context: Context): Double {
         val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return 8.0
@@ -232,12 +333,22 @@ object HardwareDetector {
         return if (simulate4GB) 4.0 else getPhysicalMemoryGB(context)
     }
 
-    fun isTierUnlocked(context: Context, tier: WhisperModelTier, simulate4GB: Boolean): Boolean {
+    fun isTierUnlocked(
+        context: Context,
+        tier: WhisperModelTier,
+        simulate4GB: Boolean,
+        forceUnlock: Boolean = false
+    ): Boolean {
+        if (forceUnlock) return true
         return getEffectiveMemoryGB(context, simulate4GB) >= tier.minimumRequiredRAMGB
     }
 
-    fun unlockedTiers(context: Context, simulate4GB: Boolean): List<WhisperModelTier> {
-        return WhisperModelTier.entries.filter { isTierUnlocked(context, it, simulate4GB) }
+    fun unlockedTiers(
+        context: Context,
+        simulate4GB: Boolean,
+        forceUnlock: Boolean = false
+    ): List<WhisperModelTier> {
+        return WhisperModelTier.entries.filter { isTierUnlocked(context, it, simulate4GB, forceUnlock) }
     }
 
     fun recommendedTier(context: Context, simulate4GB: Boolean): WhisperModelTier {
@@ -245,8 +356,7 @@ object HardwareDetector {
         return when {
             ram >= 11.2 -> WhisperModelTier.TITAN
             ram >= 7.4 -> WhisperModelTier.EXPERT_PLUS
-            ram >= 5.4 -> WhisperModelTier.ZERO_FAUTE
-            ram >= 3.6 -> WhisperModelTier.NORMAL
+            ram >= 3.6 -> WhisperModelTier.ZERO_FAUTE
             else -> WhisperModelTier.ECLAIR
         }
     }

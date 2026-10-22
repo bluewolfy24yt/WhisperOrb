@@ -6,1198 +6,2522 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.content.res.Configuration
-import android.graphics.Color
-import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
+import android.graphics.Bitmap
+import android.graphics.Color as AndroidColor
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.provider.Settings
-import android.text.InputType
-import android.util.TypedValue
-import android.view.Gravity
-import android.view.View
-import android.view.ViewGroup
-import android.view.inputmethod.InputMethodManager
-import android.widget.EditText
-import android.widget.HorizontalScrollView
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.TextView
-import android.widget.Toast
-import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.ActivityCompat
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
+import kotlinx.coroutines.delay
+import java.util.Locale
+import kotlin.math.roundToInt
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : ComponentActivity() {
 
-    private lateinit var engine: WhisperAndroidEngine
-    private lateinit var downloader: ModelDownloader
-    private lateinit var styleMemory: UserStyleMemoryManager
-
-    private lateinit var mainOrbView: GeminiOrbCanvasView
-    private lateinit var headerStatusDot: View
-    private lateinit var headerStatusText: TextView
-    private lateinit var orbStatusLabel: TextView
-    private lateinit var engineBannerLabel: TextView
-    private lateinit var step1EnableImeBtn: TextView
-    private lateinit var step2SelectImeBtn: TextView
-    private lateinit var languagePillsRow: LinearLayout
-    private lateinit var testTranscriptInput: EditText
-    private lateinit var modelsContainerLayout: LinearLayout
-    private lateinit var styleReplacementsContainer: LinearLayout
-    private lateinit var rawJsonPreviewText: TextView
-
-    private val uiRefreshListener: () -> Unit = {
-        refreshAllDynamicViews()
-    }
+    private val micPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { _ -> }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Barre de statut & barre de navigation Noir Cosmique pur (#07080C)
-        window.statusBarColor = Color.parseColor("#07080C")
-        window.navigationBarColor = Color.parseColor("#07080C")
-
-        engine = WhisperAndroidEngine.getInstance(applicationContext)
-        downloader = ModelDownloader.getInstance(applicationContext)
-        styleMemory = UserStyleMemoryManager.getInstance(applicationContext)
-
-        requestAudioPermissionIfNeeded()
-
-        setContentView(buildResponsiveRootLayout())
-
-        engine.addListener(uiRefreshListener)
-        downloader.onStateChanged = {
-            refreshModelsList()
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
 
+        // Pré-chargement automatique du modèle sélectionné s'il est déjà présent sur l'appareil
+        val engine = WhisperAndroidEngine.getInstance(this)
+        val downloader = ModelDownloader.getInstance(this)
         if (downloader.isModelDownloaded(engine.selectedModel)) {
             engine.loadModel(engine.selectedModel)
+        } else {
+            val firstReady = WhisperModelTier.entries.firstOrNull {
+                downloader.isModelDownloaded(it) &&
+                    HardwareDetector.isTierUnlocked(this, it, engine.simulateModest4GBDevice, engine.forceUnlockAllModels)
+            }
+            if (firstReady != null) {
+                engine.selectedModel = firstReady
+                engine.loadModel(firstReady)
+            }
+        }
+
+        setContent {
+            WhisperOrbTheme {
+                WhisperOrbContentView()
+            }
         }
     }
 
     override fun onResume() {
         super.onResume()
-        refreshAllDynamicViews()
+        WhisperOrbAccessibilityService.requestRefresh()
+    }
+}
+
+// Palette exacte de WhisperOrbApp/ContentView.swift (Apple iOS / iPadOS)
+private val BgPageColor = Color(0xFF09090B)
+private val CardBgColor = Color(0xFF131317)
+private val InnerBoxColor = Color(0xFF0D0D11)
+private val AppleBlue = Color(0xFF0A84FF)
+private val AppleGreen = Color(0xFF30D158)
+private val AppleOrange = Color(0xFFFF9F0A)
+private val AppleRed = Color(0xFFFF453A)
+private val AppleYellow = Color(0xFFFFD60A)
+
+@Composable
+fun WhisperOrbTheme(content: @Composable () -> Unit) {
+    val scheme = darkColorScheme(
+        primary = AppleBlue,
+        secondary = AppleGreen,
+        background = BgPageColor,
+        surface = CardBgColor,
+        onBackground = Color.White,
+        onSurface = Color.White
+    )
+    MaterialTheme(colorScheme = scheme, content = content)
+}
+
+@Composable
+fun WhisperOrbContentView() {
+    val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val isLargeScreen = configuration.screenWidthDp >= 680 || HardwareDetector.isTabletOrLargeScreen(context)
+
+    val engine = remember { WhisperAndroidEngine.getInstance(context) }
+    val downloader = remember { ModelDownloader.getInstance(context) }
+    val styleMemory = remember { UserStyleMemoryManager.getInstance(context) }
+
+    var uiTick by remember { mutableIntStateOf(0) }
+    var colorSearchText by remember { mutableStateOf("") }
+    var showCopiedToast by remember { mutableStateOf(false) }
+    var showRepoCopiedToast by remember { mutableStateOf(false) }
+    var showJSONCopiedToast by remember { mutableStateOf(false) }
+    var newSpokenPhrase by remember { mutableStateOf("") }
+    var newWrittenReplacement by remember { mutableStateOf("") }
+    var showRawJSONPreview by remember { mutableStateOf(false) }
+    var easterEggStepIndex by remember { mutableStateOf<Int?>(null) }
+    var showCustomColorDialogForBg by remember { mutableStateOf<Boolean?>(null) }
+    var numericTestValue by remember { mutableStateOf("") }
+
+    DisposableEffect(engine, downloader) {
+        val listener: () -> Unit = { uiTick++ }
+        engine.addListener(listener)
+        downloader.onStateChanged = { uiTick++ }
+        onDispose {
+            engine.removeListener(listener)
+        }
     }
 
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) {
-            refreshKeyboardActivationSteps()
+    // Rafraîchissement périodique léger pour détecter l'activation du service Gboard
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1200L)
+            uiTick++
         }
     }
 
-    override fun onConfigurationChanged(newConfig: Configuration) {
-        super.onConfigurationChanged(newConfig)
-        setContentView(buildResponsiveRootLayout())
-        refreshAllDynamicViews()
+    // Lecture réactive liée à uiTick
+    val currentTick = uiTick
+    val isGboardServiceActive = remember(currentTick) {
+        WhisperOrbAccessibilityService.isServiceEnabled(context)
     }
 
-    override fun onDestroy() {
-        engine.removeListener(uiRefreshListener)
-        downloader.onStateChanged = null
-        super.onDestroy()
-    }
-
-    private fun requestAudioPermissionIfNeeded() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 101)
-        }
-    }
-
-    // MARK: - Architecture Responsive 1 Colonne (Smartphone) / 2 Colonnes (Tablettes Android, Chromebook Plus & Googlebook 14)
-
-    private fun buildResponsiveRootLayout(): View {
-        val isLargeScreen = HardwareDetector.isTabletOrLargeScreen(this)
-
-        val scroll = ScrollView(this).apply {
-            setBackgroundColor(Color.parseColor("#07080C"))
-            isFillViewport = true
-        }
-
-        val outer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            val hPad = dp(if (isLargeScreen) 26 else 16)
-            setPadding(hPad, dp(16), hPad, dp(36))
-        }
-
-        outer.addView(buildCosmicHeaderSection())
-        outer.addView(space(dp(18)))
-
-        val card1 = buildCard1StudioAndNativeKeyboardSection()
-        val card2 = buildCard2ModelsCatalogSection()
-        val card3 = buildCard3StyleMemorySection()
-        val card4 = buildCard4AppearanceStudioSection()
-        val card5 = buildCard5EcosystemAndGitHubSection()
-
-        if (isLargeScreen) {
-            // Mode 2 Colonnes automatique pour Tablettes Android (Galaxy Tab, Pixel Tablet), Chromebook Plus & Googlebook 14
-            val columnsRow = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.TOP
-            }
-
-            val leftCol = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    marginEnd = dp(10)
-                }
-            }
-            val rightCol = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    marginStart = dp(10)
-                }
-            }
-
-            leftCol.addView(card1)
-            leftCol.addView(space(dp(18)))
-            leftCol.addView(card3)
-            leftCol.addView(space(dp(18)))
-            leftCol.addView(card5)
-
-            rightCol.addView(card2)
-            rightCol.addView(space(dp(18)))
-            rightCol.addView(card4)
-
-            columnsRow.addView(leftCol)
-            columnsRow.addView(rightCol)
-            outer.addView(columnsRow)
-        } else {
-            outer.addView(card1)
-            outer.addView(space(dp(18)))
-            outer.addView(card2)
-            outer.addView(space(dp(18)))
-            outer.addView(card3)
-            outer.addView(space(dp(18)))
-            outer.addView(card4)
-            outer.addView(space(dp(18)))
-            outer.addView(card5)
-        }
-
-        scroll.addView(outer)
-        return scroll
-    }
-
-    // MARK: - En-Tête Cosmic Dark Pro (Identique à la Version Apple)
-
-    private fun buildCosmicHeaderSection(): View {
-        val header = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(4), dp(4), dp(4), dp(4))
-        }
-
-        val leftCol = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        }
-
-        val titleRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-
-        val title = TextView(this).apply {
-            text = "WhisperOrb"
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 25f)
-            typeface = Typeface.DEFAULT_BOLD
-        }
-
-        val versionPill = TextView(this).apply {
-            text = "v2.0 • ON-DEVICE AI"
-            setTextColor(Color.parseColor("#E6FFFFFF"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
-            typeface = Typeface.MONOSPACE
-            setPadding(dp(9), dp(4), dp(9), dp(4))
-            background = CosmicUiFactory.roundedCardDrawable(this@MainActivity, "#1A0A84FF", 20, "#400A84FF")
-        }
-
-        titleRow.addView(title)
-        titleRow.addView(spaceHorizontal(dp(10)))
-        titleRow.addView(versionPill)
-
-        val telemetryText = TextView(this).apply {
-            text = "${HardwareDetector.getTelemetrySummary(this@MainActivity)} • ${WhisperNativeBridge.getCpuTopologySummary()}"
-            setTextColor(Color.parseColor("#99FFFFFF"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
-            setPadding(0, dp(4), 0, dp(4))
-        }
-
-        val badgeRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        badgeRow.addView(
-            CosmicUiFactory.createSpecBadge(
-                this,
-                HardwareDetector.getFormFactorBadge(this),
-                "#D938BDF8",
-                "#1438BDF8"
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(BgPageColor)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = if (isLargeScreen) 24.dp else 16.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
+        ) {
+            SoberAppHeaderSection(
+                context = context,
+                isServiceActive = isGboardServiceActive
             )
-        )
-        if (HardwareDetector.isHardwareKeyboardAttached(this)) {
-            badgeRow.addView(spaceHorizontal(dp(6)))
-            badgeRow.addView(
-                CosmicUiFactory.createSpecBadge(
-                    this,
-                    "⌨️ Clavier Physique Détecté (Ctrl+V auto)",
-                    "#30D158",
-                    "#1630D158"
-                )
-            )
-        }
 
-        leftCol.addView(titleRow)
-        leftCol.addView(telemetryText)
-        leftCol.addView(badgeRow)
+            if (isLargeScreen) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(18.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(18.dp)
+                    ) {
+                        Card1VoiceStudioSection(
+                            context = context,
+                            engine = engine,
+                            isServiceActive = isGboardServiceActive,
+                            showCopiedToast = showCopiedToast,
+                            onShowCopiedToast = { showCopiedToast = it },
+                            numericTestValue = numericTestValue,
+                            onNumericTestValueChange = { numericTestValue = it },
+                            onForceRefresh = { uiTick++ }
+                        )
+                        CardStyleMemorySection(
+                            context = context,
+                            engine = engine,
+                            styleMemory = styleMemory,
+                            newSpokenPhrase = newSpokenPhrase,
+                            onNewSpokenChange = { newSpokenPhrase = it },
+                            newWrittenReplacement = newWrittenReplacement,
+                            onNewWrittenChange = { newWrittenReplacement = it },
+                            showRawJSONPreview = showRawJSONPreview,
+                            onToggleRawJSON = { showRawJSONPreview = !showRawJSONPreview },
+                            showJSONCopiedToast = showJSONCopiedToast,
+                            onShowJSONCopied = { showJSONCopiedToast = it },
+                            onForceRefresh = { uiTick++ }
+                        )
+                        Card4PreferencesAndVoiceCommands(
+                            engine = engine,
+                            onForceRefresh = { uiTick++ }
+                        )
+                        Card5GitHubAndSetupSection(
+                            context = context,
+                            isServiceActive = isGboardServiceActive,
+                            showRepoCopiedToast = showRepoCopiedToast,
+                            onShowRepoCopied = { showRepoCopiedToast = it }
+                        )
+                    }
 
-        val statusPill = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(7), dp(12), dp(7))
-            background = CosmicUiFactory.roundedCardDrawable(this@MainActivity, "#14FFFFFF", 20, "#20FFFFFF")
-        }
-
-        headerStatusDot = View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(dp(8), dp(8)).apply { marginEnd = dp(6) }
-            background = circleDrawable("#30D158")
-        }
-        headerStatusText = TextView(this).apply {
-            text = "Prêt"
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-            typeface = Typeface.DEFAULT_BOLD
-        }
-        statusPill.addView(headerStatusDot)
-        statusPill.addView(headerStatusText)
-
-        header.addView(leftCol)
-        header.addView(spaceHorizontal(dp(8)))
-        header.addView(statusPill)
-        return header
-    }
-
-    // MARK: - Carte 1 : Studio Vocal, Vrai Clavier Android Natif & Correcteur IA
-
-    private fun buildCard1StudioAndNativeKeyboardSection(): View {
-        val card = createCosmicCard()
-
-        card.addView(
-            createCardHeader(
-                icon = "🎙️",
-                title = "Studio Vocal & Clavier Natif WhisperOrb",
-                subtitle = "Orbe 3D incrusté dans le clavier, bouton « ▾ Réduire », 3 prédictions IA & clavier de chiffres auto"
-            )
-        )
-        card.addView(space(dp(14)))
-
-        // Scène Cosmique de l'Orbe 3D
-        val stage = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(dp(18), dp(22), dp(18), dp(18))
-            background = CosmicUiFactory.roundedCardDrawable(this@MainActivity, "#0A0C12", 18, "#2238BDF8")
-        }
-
-        mainOrbView = GeminiOrbCanvasView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(dp(128), dp(128))
-            bgHex = engine.bgHex
-            fgHex = engine.fgHex
-            orbState = engine.orbState
-            audioLevel = engine.currentAudioLevel
-            setOnClickListener {
-                engine.toggleRecording()
-            }
-        }
-
-        orbStatusLabel = TextView(this).apply {
-            text = "${engine.orbState.statusTitle} • ${engine.selectedLanguage.shortPillLabel}"
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-        }
-
-        engineBannerLabel = TextView(this).apply {
-            text = engine.statusBannerMessage
-            setTextColor(Color.parseColor("#38BDF8"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
-            gravity = Gravity.CENTER
-        }
-
-        stage.addView(mainOrbView)
-        stage.addView(space(dp(12)))
-        stage.addView(orbStatusLabel)
-        stage.addView(space(dp(4)))
-        stage.addView(engineBannerLabel)
-        card.addView(stage)
-        card.addView(space(dp(14)))
-
-        // Activation en 2 étapes du Vrai Clavier Android Natif (InputMethodService)
-        val setupBox = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), dp(12), dp(14), dp(12))
-            background = CosmicUiFactory.roundedCardDrawable(this@MainActivity, "#0C0E14", 16, "#1EFFFFFF")
-        }
-
-        val setupHeader = TextView(this).apply {
-            text = "⌨️ Activation du Clavier Android WhisperOrb"
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-            typeface = Typeface.DEFAULT_BOLD
-        }
-        setupBox.addView(setupHeader)
-        setupBox.addView(space(dp(8)))
-
-        val stepsRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-        }
-
-        step1EnableImeBtn = TextView(this).apply {
-            gravity = Gravity.CENTER
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-            typeface = Typeface.DEFAULT_BOLD
-            setPadding(dp(10), dp(10), dp(10), dp(10))
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginEnd = dp(6)
-            }
-            setOnClickListener {
-                startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
-            }
-        }
-
-        step2SelectImeBtn = TextView(this).apply {
-            gravity = Gravity.CENTER
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-            typeface = Typeface.DEFAULT_BOLD
-            setPadding(dp(10), dp(10), dp(10), dp(10))
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginStart = dp(6)
-            }
-            setOnClickListener {
-                val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-                imm?.showInputMethodPicker()
-            }
-        }
-
-        stepsRow.addView(step1EnableImeBtn)
-        stepsRow.addView(step2SelectImeBtn)
-        setupBox.addView(stepsRow)
-        card.addView(setupBox)
-        card.addView(space(dp(14)))
-
-        // Sélecteur de Langue par Pastilles Fluides (Zéro Spinner moche !)
-        val langHeaderRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        val langLabel = TextView(this).apply {
-            text = "🌐 Langue de dictée & du correcteur IA"
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-            typeface = Typeface.DEFAULT_BOLD
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        val isoBadge = TextView(this).apply {
-            text = "ISO : ${engine.selectedLanguage.resolvedWhisperCode.uppercase()}"
-            setTextColor(Color.parseColor("#38BDF8"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
-            typeface = Typeface.MONOSPACE
-        }
-        langHeaderRow.addView(langLabel)
-        langHeaderRow.addView(isoBadge)
-        card.addView(langHeaderRow)
-        card.addView(space(dp(8)))
-
-        val langScroll = HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
-        }
-        languagePillsRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-        }
-        langScroll.addView(languagePillsRow)
-        card.addView(langScroll)
-        rebuildLanguagePills()
-        card.addView(space(dp(14)))
-
-        // Toggles fluides CosmicPillSwitch (Mode Clavier Réduit & Correcteur Automatique IA)
-        card.addView(
-            CosmicUiFactory.createSettingSwitchRow(
-                context = this,
-                title = "Mode clavier réduit (« ▾ Réduire »)",
-                subtitle = "Replie tout le clavier en une barre vocale compacte de 58dp comme sur Apple",
-                initialChecked = engine.isKeyboardCollapsed,
-                activeColorHex = "#0A84FF"
-            ) { checked ->
-                engine.isKeyboardCollapsed = checked
-            }
-        )
-        card.addView(space(dp(8)))
-
-        card.addView(
-            CosmicUiFactory.createSettingSwitchRow(
-                context = this,
-                title = "Correcteur automatique IA & 3 prédictions",
-                subtitle = "Corrige les fautes de frappe et apostrophes (j'arrive, c'est, t'inquiète) en < 0,2 ms",
-                initialChecked = engine.isSmartAutocorrectEnabled,
-                activeColorHex = "#30D158"
-            ) { checked ->
-                engine.isSmartAutocorrectEnabled = checked
-            }
-        )
-        card.addView(space(dp(14)))
-
-        // Arène de Test en Direct (Clavier Complet avec Orbe vs Clavier de Chiffres Pur)
-        val arenaLabel = TextView(this).apply {
-            text = "✨ Arène de test en direct (Clavier Normal vs Clavier de Chiffres)"
-            setTextColor(Color.parseColor("#CCFFFFFF"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
-            typeface = Typeface.DEFAULT_BOLD
-        }
-        card.addView(arenaLabel)
-        card.addView(space(dp(6)))
-
-        testTranscriptInput = EditText(this).apply {
-            hint = "✍️ Touchez ici : ouvre le Clavier WhisperOrb avec l'Orbe incrusté, « ▾ Réduire » et les 3 prédictions IA..."
-            setHintTextColor(Color.parseColor("#66FFFFFF"))
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-            minLines = 3
-            gravity = Gravity.TOP or Gravity.START
-            setPadding(dp(14), dp(12), dp(14), dp(12))
-            background = CosmicUiFactory.roundedCardDrawable(this@MainActivity, "#0A0C12", 14, "#24FFFFFF")
-        }
-        card.addView(testTranscriptInput)
-        card.addView(space(dp(8)))
-
-        val numericTestInput = EditText(this).apply {
-            hint = "🔢 Touchez ici (Champ Chiffres / PIN) : bascule en Clavier de Chiffres pur SANS Orbe !"
-            setHintTextColor(Color.parseColor("#99FF9F0A"))
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
-            inputType = InputType.TYPE_CLASS_NUMBER
-            setPadding(dp(14), dp(11), dp(14), dp(11))
-            background = CosmicUiFactory.roundedCardDrawable(this@MainActivity, "#0A0C12", 12, "#33FF9F0A")
-        }
-        card.addView(numericTestInput)
-
-        refreshKeyboardActivationSteps()
-        return card
-    }
-
-    private fun rebuildLanguagePills() {
-        if (!::languagePillsRow.isInitialized) return
-        languagePillsRow.removeAllViews()
-
-        for (lang in WhisperLanguageSelection.entries) {
-            val isSelected = (engine.selectedLanguage == lang)
-            val pill = TextView(this).apply {
-                text = if (lang == WhisperLanguageSelection.SYSTEM) {
-                    "📱 Système (${WhisperLanguageSelection.detectedSystemISOCode.uppercase()})"
-                } else {
-                    lang.shortPillLabel
-                }
-                setTextColor(Color.WHITE)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
-                typeface = Typeface.DEFAULT_BOLD
-                setPadding(dp(12), dp(8), dp(12), dp(8))
-                background = if (isSelected) {
-                    CosmicUiFactory.roundedCardDrawable(this@MainActivity, "#0A84FF", 12, "#66FFFFFF")
-                } else {
-                    CosmicUiFactory.roundedCardDrawable(this@MainActivity, "#0C0E14", 12, "#1AFFFFFF")
-                }
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply { marginEnd = dp(8) }
-                setOnClickListener {
-                    engine.selectedLanguage = lang
-                    rebuildLanguagePills()
-                    refreshStyleReplacementsList()
-                }
-            }
-            languagePillsRow.addView(pill)
-        }
-    }
-
-    private fun refreshKeyboardActivationSteps() {
-        if (!::step1EnableImeBtn.isInitialized || !::step2SelectImeBtn.isInitialized) return
-        val enabled = WhisperOrbInputMethodService.isImeEnabled(this)
-        val selected = WhisperOrbInputMethodService.isImeSelectedAsDefault(this)
-
-        step1EnableImeBtn.apply {
-            text = if (enabled) "✓ 1. Clavier Activé" else "1. Activer le Clavier"
-            setTextColor(if (enabled) Color.parseColor("#30D158") else Color.WHITE)
-            background = if (enabled) {
-                CosmicUiFactory.roundedCardDrawable(this@MainActivity, "#1630D158", 12, "#4030D158")
-            } else {
-                CosmicUiFactory.roundedCardDrawable(this@MainActivity, "#0A84FF", 12, "#55FFFFFF")
-            }
-        }
-
-        step2SelectImeBtn.apply {
-            text = if (selected) "✓ 2. Clavier Actif" else "2. Choisir WhisperOrb"
-            setTextColor(if (selected) Color.parseColor("#30D158") else Color.WHITE)
-            background = if (selected) {
-                CosmicUiFactory.roundedCardDrawable(this@MainActivity, "#1630D158", 12, "#4030D158")
-            } else {
-                CosmicUiFactory.roundedCardDrawable(this@MainActivity, "#0A84FF", 12, "#55FFFFFF")
-            }
-        }
-    }
-
-    // MARK: - Carte 2 : Catalogue Complet des 7 Modèles Whisper (De Nano 31 Mo jusqu'à TITAN 1,08 Go)
-
-    private fun buildCard2ModelsCatalogSection(): View {
-        val card = createCosmicCard()
-        val unlockedCount = HardwareDetector.unlockedTiers(this, engine.simulateModest4GBDevice).size
-
-        card.addView(
-            createCardHeader(
-                icon = "🧠",
-                title = "Catalogue des 7 Modèles Whisper",
-                subtitle = "De Whisper Nano (31 Mo) jusqu'à Whisper TITAN Large-v3 (1,08 Go) • $unlockedCount/7 débloqués"
-            )
-        )
-        card.addView(space(dp(12)))
-
-        card.addView(
-            CosmicUiFactory.createSettingSwitchRow(
-                context = this,
-                title = "🧪 Simuler un téléphone modeste (4 Go RAM)",
-                subtitle = "Permet de tester le verrouillage automatique des modèles lourds sur ton appareil",
-                initialChecked = engine.simulateModest4GBDevice,
-                activeColorHex = "#FF9F0A"
-            ) { checked ->
-                engine.simulateModest4GBDevice = checked
-                refreshModelsList()
-            }
-        )
-        card.addView(space(dp(14)))
-
-        modelsContainerLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-        card.addView(modelsContainerLayout)
-
-        refreshModelsList()
-        return card
-    }
-
-    private fun refreshModelsList() {
-        if (!::modelsContainerLayout.isInitialized) return
-        modelsContainerLayout.removeAllViews()
-
-        val simulate4GB = engine.simulateModest4GBDevice
-        val recommended = HardwareDetector.recommendedTier(this, simulate4GB)
-
-        for (tier in WhisperModelTier.entries) {
-            val isUnlocked = HardwareDetector.isTierUnlocked(this, tier, simulate4GB)
-            val isSelected = (engine.selectedModel == tier)
-            val isDownloaded = downloader.isModelDownloaded(tier)
-            val isDownloading = downloader.isDownloading(tier)
-            val progress = downloader.downloadProgress[tier] ?: 0f
-
-            val strokeHex = when {
-                isSelected && isUnlocked -> "#0A84FF"
-                !isUnlocked -> "#22FF9F0A"
-                else -> "#18FFFFFF"
-            }
-            val fillHex = if (isSelected && isUnlocked) "#121624" else "#0B0D14"
-
-            val itemBox = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(14), dp(13), dp(14), dp(13))
-                background = CosmicUiFactory.roundedCardDrawable(
-                    this@MainActivity,
-                    fillHex,
-                    16,
-                    strokeHex,
-                    if (isSelected && isUnlocked) 2 else 1
-                )
-            }
-
-            val topRow = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-            }
-
-            val nameView = TextView(this).apply {
-                text = tier.displayName
-                setTextColor(if (isUnlocked) Color.WHITE else Color.parseColor("#75FFFFFF"))
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-                typeface = Typeface.DEFAULT_BOLD
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            }
-            topRow.addView(nameView)
-
-            if (tier == recommended && isUnlocked) {
-                topRow.addView(
-                    CosmicUiFactory.createSpecBadge(this, "★ Recommandé", "#38BDF8", "#1A38BDF8")
-                )
-                topRow.addView(spaceHorizontal(dp(6)))
-            }
-
-            val statusBadge = CosmicUiFactory.createSpecBadge(
-                context = this,
-                label = when {
-                    !isUnlocked -> "🔒 ${tier.requiredRAMBadgeText}"
-                    isDownloaded -> "✓ Prêt"
-                    else -> "${tier.sizeMB} Mo"
-                },
-                textHex = when {
-                    !isUnlocked -> "#FF9F0A"
-                    isDownloaded -> "#30D158"
-                    else -> "#B3FFFFFF"
-                },
-                bgHex = when {
-                    !isUnlocked -> "#1AFF9F0A"
-                    isDownloaded -> "#1A30D158"
-                    else -> "#14FFFFFF"
-                }
-            )
-            topRow.addView(statusBadge)
-
-            val subView = TextView(this).apply {
-                text = tier.subtitle
-                setTextColor(Color.parseColor(if (isUnlocked) "#AAFFFFFF" else "#55FFFFFF"))
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-                setPadding(0, dp(4), 0, dp(8))
-            }
-
-            // Barre de 3 pastilles techniques (Disque • RAM • Latence)
-            val specsRow = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-            }
-            specsRow.addView(CosmicUiFactory.createSpecBadge(this, "💾 ${tier.sizeMB} Mo", "#B3FFFFFF", "#12FFFFFF"))
-            specsRow.addView(spaceHorizontal(dp(6)))
-            specsRow.addView(CosmicUiFactory.createSpecBadge(this, "🧠 ${tier.ramUsageMB} Mo RAM", "#B3FFFFFF", "#12FFFFFF"))
-            specsRow.addView(spaceHorizontal(dp(6)))
-            specsRow.addView(CosmicUiFactory.createSpecBadge(this, "⚡ ${tier.latencyDescription}", "#38BDF8", "#1238BDF8"))
-
-            itemBox.addView(topRow)
-            itemBox.addView(subView)
-            itemBox.addView(specsRow)
-            itemBox.addView(space(dp(10)))
-
-            if (isDownloading) {
-                val bar = CosmicProgressBar(this).apply {
-                    progressFraction = progress
-                }
-                val cancelBtn = TextView(this).apply {
-                    text = "Téléchargement en cours : ${(progress * 100).toInt()} %  •  Annuler ✕"
-                    setTextColor(Color.parseColor("#FF453A"))
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-                    typeface = Typeface.DEFAULT_BOLD
-                    gravity = Gravity.CENTER
-                    setPadding(dp(10), dp(8), dp(10), dp(4))
-                    setOnClickListener {
-                        downloader.cancelDownload(tier)
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(18.dp)
+                    ) {
+                        Card2ModelsSection(
+                            context = context,
+                            engine = engine,
+                            downloader = downloader,
+                            onTriggerEasterEgg = { easterEggStepIndex = 0 },
+                            onForceRefresh = { uiTick++ }
+                        )
+                        Card3AppearanceStudioSection(
+                            engine = engine,
+                            colorSearchText = colorSearchText,
+                            onColorSearchChange = { colorSearchText = it },
+                            onOpenCustomPicker = { isBg -> showCustomColorDialogForBg = isBg },
+                            onForceRefresh = { uiTick++ }
+                        )
                     }
                 }
-                itemBox.addView(bar)
-                itemBox.addView(cancelBtn)
-            } else if (!isUnlocked) {
-                val lockNotice = TextView(this).apply {
-                    text = "🔒 Verrouillé par sécurité matérielle (nécessite ${tier.requiredRAMBadgeText})"
-                    setTextColor(Color.parseColor("#CCFF9F0A"))
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
-                }
-                itemBox.addView(lockNotice)
             } else {
-                val btnRow = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(18.dp)
+                ) {
+                    Card1VoiceStudioSection(
+                        context = context,
+                        engine = engine,
+                        isServiceActive = isGboardServiceActive,
+                        showCopiedToast = showCopiedToast,
+                        onShowCopiedToast = { showCopiedToast = it },
+                        numericTestValue = numericTestValue,
+                        onNumericTestValueChange = { numericTestValue = it },
+                        onForceRefresh = { uiTick++ }
+                    )
+                    Card2ModelsSection(
+                        context = context,
+                        engine = engine,
+                        downloader = downloader,
+                        onTriggerEasterEgg = { easterEggStepIndex = 0 },
+                        onForceRefresh = { uiTick++ }
+                    )
+                    CardStyleMemorySection(
+                        context = context,
+                        engine = engine,
+                        styleMemory = styleMemory,
+                        newSpokenPhrase = newSpokenPhrase,
+                        onNewSpokenChange = { newSpokenPhrase = it },
+                        newWrittenReplacement = newWrittenReplacement,
+                        onNewWrittenChange = { newWrittenReplacement = it },
+                        showRawJSONPreview = showRawJSONPreview,
+                        onToggleRawJSON = { showRawJSONPreview = !showRawJSONPreview },
+                        showJSONCopiedToast = showJSONCopiedToast,
+                        onShowJSONCopied = { showJSONCopiedToast = it },
+                        onForceRefresh = { uiTick++ }
+                    )
+                    Card3AppearanceStudioSection(
+                        engine = engine,
+                        colorSearchText = colorSearchText,
+                        onColorSearchChange = { colorSearchText = it },
+                        onOpenCustomPicker = { isBg -> showCustomColorDialogForBg = isBg },
+                        onForceRefresh = { uiTick++ }
+                    )
+                    Card4PreferencesAndVoiceCommands(
+                        engine = engine,
+                        onForceRefresh = { uiTick++ }
+                    )
+                    Card5GitHubAndSetupSection(
+                        context = context,
+                        isServiceActive = isGboardServiceActive,
+                        showRepoCopiedToast = showRepoCopiedToast,
+                        onShowRepoCopied = { showRepoCopiedToast = it }
+                    )
+                }
+            }
+        }
+
+        // Modal Easter Egg des 7 messages d'avertissement progressifs (FR & EN)
+        easterEggStepIndex?.let { stepIdx ->
+            EasterEggWarningModalOverlay(
+                stepIndex = stepIdx,
+                isEnglish = (engine.selectedLanguage.effectiveStyleLanguageCode == "en"),
+                onCancel = { easterEggStepIndex = null },
+                onConfirmStep = {
+                    triggerHaptic(context)
+                    val allSteps = EasterEggUnlockStep.allSteps
+                    if (stepIdx + 1 < allSteps.size) {
+                        easterEggStepIndex = stepIdx + 1
+                    } else {
+                        engine.forceUnlockAllModels = true
+                        easterEggStepIndex = null
+                        uiTick++
+                    }
+                }
+            )
+        }
+
+        // Sélecteur de couleur personnalisée (Cœur de l'orbe / Onde lumineuse)
+        showCustomColorDialogForBg?.let { isBgTarget ->
+            CustomColorPickerDialog(
+                title = if (isBgTarget) "Couleur de fond personnalisée" else "Couleur d'onde personnalisée",
+                initialHex = if (isBgTarget) engine.bgHex else engine.fgHex,
+                onDismiss = { showCustomColorDialogForBg = null },
+                onColorSelected = { hex ->
+                    if (isBgTarget) {
+                        engine.bgHex = hex
+                    } else {
+                        engine.fgHex = hex
+                    }
+                    showCustomColorDialogForBg = null
+                    uiTick++
+                }
+            )
+        }
+    }
+}
+
+// MARK: - En-tête Sobre & Grand Public (v2.0 • ON-DEVICE AI)
+
+@Composable
+private fun SoberAppHeaderSection(
+    context: Context,
+    isServiceActive: Boolean
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "WhisperOrb",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .padding(horizontal = 7.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = "v2.0 • ON-DEVICE AI",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color.White.copy(alpha = 0.75f)
+                    )
+                }
+            }
+            Text(
+                text = HardwareDetector.getTelemetrySummary(context),
+                fontSize = 12.sp,
+                color = Color.White.copy(alpha = 0.55f)
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.06f))
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(7.dp)
+                    .clip(CircleShape)
+                    .background(if (isServiceActive) AppleGreen else AppleOrange)
+            )
+            Text(
+                text = if (isServiceActive) "Actif" else "En veille",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color.White.copy(alpha = 0.85f)
+            )
+        }
+    }
+}
+
+// MARK: - Carte 1 : Studio Vocal, Langue & Incrustation Gboard 3-États
+
+@Composable
+private fun Card1VoiceStudioSection(
+    context: Context,
+    engine: WhisperAndroidEngine,
+    isServiceActive: Boolean,
+    showCopiedToast: Boolean,
+    onShowCopiedToast: (Boolean) -> Unit,
+    numericTestValue: String,
+    onNumericTestValueChange: (String) -> Unit,
+    onForceRefresh: () -> Unit
+) {
+    var langMenuExpanded by remember { mutableStateOf(false) }
+
+    AppleCardSurface {
+        CardSectionHeader(
+            iconText = "〰",
+            title = "Studio Vocal",
+            subtitle = "Touchez l'orbe pour dicter ou activez le bandeau incrusté au-dessus de votre clavier Gboard"
+        )
+
+        // Scène 190dp de l'Orbe 3D 120 Hz (#0D0D11)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(190.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(InnerBoxColor)
+                .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(18.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                AndroidView(
+                    modifier = Modifier.size(118.dp),
+                    factory = { ctx ->
+                        GeminiOrbCanvasView(ctx).apply {
+                            setOnClickListener {
+                                triggerHaptic(ctx)
+                                engine.toggleRecording()
+                                onForceRefresh()
+                            }
+                        }
+                    },
+                    update = { view ->
+                        view.bgHex = engine.bgHex
+                        view.fgHex = engine.fgHex
+                        view.audioLevel = engine.currentAudioLevel
+                        view.orbState = engine.orbState
+                    }
+                )
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val statusDotColor = when (engine.orbState) {
+                        WhisperOrbState.IDLE -> AppleGreen
+                        WhisperOrbState.LISTENING -> AppleBlue
+                        WhisperOrbState.TRANSCRIBING -> AppleYellow
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(statusDotColor)
+                    )
+                    Text(
+                        text = "${engine.orbState.statusTitle} • ${engine.selectedLanguage.shortPillLabel}",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White.copy(alpha = 0.75f)
+                    )
+                }
+            }
+        }
+
+        // Sélecteur intelligent de langue multilingue
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "🌐 Langue de dictée Whisper",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White.copy(alpha = 0.80f)
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                Text(
+                    text = "Code ISO : ${engine.selectedLanguage.resolvedWhisperCode.uppercase(Locale.ROOT)}",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    fontFamily = FontFamily.Monospace,
+                    color = AppleBlue
+                )
+            }
+
+            Box(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(InnerBoxColor)
+                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
+                        .clickable { langMenuExpanded = true }
+                        .padding(horizontal = 12.dp, vertical = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "${engine.selectedLanguage.flagEmoji} ${engine.selectedLanguage.displayName}",
+                        fontSize = 13.sp,
+                        color = Color.White,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = "▾",
+                        fontSize = 13.sp,
+                        color = Color.White.copy(alpha = 0.65f)
+                    )
                 }
 
-                if (isDownloaded) {
-                    val useBtn = TextView(this).apply {
-                        text = if (isSelected) "✓ Modèle Actif en C++ NDK" else "Activer ce modèle"
-                        setTextColor(Color.WHITE)
-                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
-                        typeface = Typeface.DEFAULT_BOLD
-                        gravity = Gravity.CENTER
-                        setPadding(dp(14), dp(9), dp(14), dp(9))
-                        background = CosmicUiFactory.roundedCardDrawable(
-                            this@MainActivity,
-                            if (isSelected) "#0A84FF" else "#1E2230",
-                            10,
-                            if (isSelected) "#66FFFFFF" else "#24FFFFFF"
+                DropdownMenu(
+                    expanded = langMenuExpanded,
+                    onDismissRequest = { langMenuExpanded = false },
+                    modifier = Modifier.background(Color(0xFF1C1C22))
+                ) {
+                    WhisperLanguageSelection.entries.forEach { lang ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = "${lang.flagEmoji} ${lang.displayName}",
+                                    color = Color.White,
+                                    fontSize = 13.sp
+                                )
+                            },
+                            onClick = {
+                                engine.selectedLanguage = lang
+                                langMenuExpanded = false
+                                onForceRefresh()
+                            }
                         )
-                        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                            marginEnd = dp(8)
+                    }
+                }
+            }
+        }
+
+        // Switch 1 : Mode clavier réduit (Barre vocale seule)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Mode clavier réduit (Barre vocale seule)",
+                fontSize = 13.sp,
+                color = Color.White.copy(alpha = 0.85f),
+                modifier = Modifier.weight(1f)
+            )
+            Switch(
+                checked = engine.isKeyboardCollapsed,
+                onCheckedChange = {
+                    engine.isKeyboardCollapsed = it
+                    WhisperOrbAccessibilityService.requestRefresh()
+                    onForceRefresh()
+                },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = AppleBlue
+                )
+            )
+        }
+
+        // Switch 2 : Correcteur automatique IA & mémoire de style
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Correcteur automatique IA & adaptation du style",
+                fontSize = 13.sp,
+                color = Color.White.copy(alpha = 0.85f),
+                modifier = Modifier.weight(1f)
+            )
+            Switch(
+                checked = engine.isSmartAutocorrectEnabled,
+                onCheckedChange = {
+                    engine.isSmartAutocorrectEnabled = it
+                    onForceRefresh()
+                },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = AppleGreen
+                )
+            )
+        }
+
+        // Bouton principal d'activation / statut du bandeau Gboard en arrière-plan
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (isServiceActive) Color(0xFF1C1C1E) else AppleBlue)
+                .border(
+                    width = 1.dp,
+                    color = if (isServiceActive) AppleGreen.copy(alpha = 0.45f) else Color.Transparent,
+                    shape = RoundedCornerShape(12.dp)
+                )
+                .clickable {
+                    triggerHaptic(context)
+                    if (isServiceActive) {
+                        WhisperOrbAccessibilityService.forcePreviewOverlay =
+                            !WhisperOrbAccessibilityService.forcePreviewOverlay
+                        WhisperOrbAccessibilityService.requestRefresh()
+                        onForceRefresh()
+                    } else {
+                        context.startActivity(
+                            Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                        )
+                    }
+                }
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = if (isServiceActive) "🎙️" else "⌨️",
+                fontSize = 18.sp
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = if (isServiceActive) {
+                        "Moteur vocal actif sur Gboard (Incrustation 3-États)"
+                    } else {
+                        "Activer l'incrustation WhisperOrb sur votre clavier Gboard"
+                    },
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White
+                )
+                Text(
+                    text = if (isServiceActive) {
+                        engine.statusBannerMessage
+                    } else {
+                        "Touchez ici pour autoriser WhisperOrb dans Accessibilité → Services installés"
+                    },
+                    fontSize = 11.sp,
+                    color = Color.White.copy(alpha = 0.80f)
+                )
+            }
+        }
+
+        // Message d'erreur éventuel
+        engine.lastErrorMessage?.let { errMsg ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color.White.copy(alpha = 0.04f))
+                    .padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(text = "⚠️", fontSize = 13.sp)
+                Text(
+                    text = errMsg,
+                    fontSize = 12.sp,
+                    color = AppleOrange
+                )
+            }
+        }
+
+        // Zone d'Aperçu de dictée en direct + Test Gboard
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Aperçu de dictée (Touchez pour ouvrir Gboard + WhisperOrb)",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.White.copy(alpha = 0.65f),
+                    modifier = Modifier.weight(1f)
+                )
+                if (engine.lastTranscriptionLatencyMs > 0) {
+                    Text(
+                        text = "${engine.lastTranscriptionLatencyMs} ms • C++ NDK",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        fontFamily = FontFamily.Monospace,
+                        color = AppleGreen
+                    )
+                }
+            }
+
+            OutlinedTextField(
+                value = engine.liveTestTranscript,
+                onValueChange = {
+                    engine.liveTestTranscript = it
+                    onForceRefresh()
+                },
+                placeholder = {
+                    Text(
+                        text = "Touchez ici pour afficher votre vrai clavier Gboard avec la barre WhisperOrb incrustée juste au-dessus...",
+                        fontSize = 13.sp,
+                        color = Color.White.copy(alpha = 0.38f)
+                    )
+                },
+                textStyle = TextStyle(fontSize = 15.sp, color = Color.White),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 96.dp, max = 145.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = InnerBoxColor,
+                    unfocusedContainerColor = InnerBoxColor,
+                    focusedBorderColor = AppleBlue.copy(alpha = 0.65f),
+                    unfocusedBorderColor = Color.White.copy(alpha = 0.08f)
+                )
+            )
+
+            // Champ de test Clavier de Chiffres (vérifie le masquage automatique sur les champs numériques)
+            OutlinedTextField(
+                value = numericTestValue,
+                onValueChange = onNumericTestValueChange,
+                placeholder = {
+                    Text(
+                        text = "🔢 Tester un champ numérique (masque automatiquement l'Orbe)",
+                        fontSize = 12.sp,
+                        color = Color.White.copy(alpha = 0.42f)
+                    )
+                },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                textStyle = TextStyle(fontSize = 13.sp, color = Color.White),
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(10.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = InnerBoxColor,
+                    unfocusedContainerColor = InnerBoxColor,
+                    focusedBorderColor = AppleOrange.copy(alpha = 0.65f),
+                    unfocusedBorderColor = Color.White.copy(alpha = 0.08f)
+                )
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                SmallActionChip(
+                    label = if (showCopiedToast) "✓ Copié" else "📋 Copier",
+                    textColor = if (showCopiedToast) AppleGreen else Color.White
+                ) {
+                    copyToClipboard(context, engine.liveTestTranscript)
+                    onShowCopiedToast(true)
+                }
+
+                SmallActionChip(
+                    label = "↶ Annuler phrase",
+                    textColor = Color.White
+                ) {
+                    val lastLen = engine.lastInsertedSentenceLength
+                    if (lastLen > 0 && engine.liveTestTranscript.length >= lastLen) {
+                        engine.liveTestTranscript = engine.liveTestTranscript.dropLast(lastLen)
+                        engine.lastInsertedSentenceLength = 0
+                    } else {
+                        engine.liveTestTranscript = ""
+                    }
+                    onForceRefresh()
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                SmallActionChip(
+                    label = "Effacer",
+                    textColor = Color.White.copy(alpha = 0.75f)
+                ) {
+                    engine.liveTestTranscript = ""
+                    onForceRefresh()
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(showCopiedToast) {
+        if (showCopiedToast) {
+            delay(2000L)
+            onShowCopiedToast(false)
+        }
+    }
+}
+
+// MARK: - Carte 2 : Catalogue des 7 Modèles Whisper + Easter Egg 7 Messages
+
+@Composable
+private fun Card2ModelsSection(
+    context: Context,
+    engine: WhisperAndroidEngine,
+    downloader: ModelDownloader,
+    onTriggerEasterEgg: () -> Unit,
+    onForceRefresh: () -> Unit
+) {
+    val unlockedCount = HardwareDetector.unlockedTiers(
+        context = context,
+        simulate4GB = engine.simulateModest4GBDevice,
+        forceUnlock = engine.forceUnlockAllModels
+    ).size
+    val isOnline = downloader.isOnline()
+
+    AppleCardSurface {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(modifier = Modifier.weight(1f)) {
+                CardSectionHeader(
+                    iconText = "🧠",
+                    title = "Catalogue des 7 Modèles Whisper",
+                    subtitle = "C++ NDK + ARM NEON • $unlockedCount/7 modèles débloqués sur votre appareil"
+                )
+            }
+            if (!isOnline) {
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(AppleOrange.copy(alpha = 0.18f))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = "Hors-Ligne",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AppleOrange
+                    )
+                }
+            }
+        }
+
+        // Switch : Simuler un téléphone modeste (4 Go RAM) -> débloque jusqu'à Whisper Expert (v3 Turbo)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(InnerBoxColor)
+                .padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = "🧪 Simuler un téléphone modeste (4 Go RAM)",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White
+                )
+                Text(
+                    text = "Débloque jusqu'à Whisper Expert (v3 Turbo) et verrouille Expert+ & TITAN",
+                    fontSize = 11.sp,
+                    color = Color.White.copy(alpha = 0.55f)
+                )
+            }
+            Switch(
+                checked = engine.simulateModest4GBDevice,
+                onCheckedChange = {
+                    engine.simulateModest4GBDevice = it
+                    onForceRefresh()
+                },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = AppleOrange
+                )
+            )
+        }
+
+        // Ligne Easter Egg : Débloquer tous les modèles quoi qu'il arrive (7 messages)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(InnerBoxColor)
+                .padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = if (engine.forceUnlockAllModels) {
+                        "🔓 Tous les modèles sont débloqués de force !"
+                    } else {
+                        "🔒 Débloquer tous les modèles quoi qu'il arrive"
+                    },
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (engine.forceUnlockAllModels) AppleGreen else Color.White
+                )
+                Text(
+                    text = if (engine.forceUnlockAllModels) {
+                        "Sécurité matérielle RAM désactivée par l'utilisateur"
+                    } else {
+                        "Outrepasser la sécurité RAM (à vos risques et périls)"
+                    },
+                    fontSize = 11.sp,
+                    color = Color.White.copy(alpha = 0.55f)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(
+                        if (engine.forceUnlockAllModels) {
+                            Color.White.copy(alpha = 0.10f)
+                        } else {
+                            AppleOrange.copy(alpha = 0.22f)
                         }
-                        setOnClickListener {
+                    )
+                    .clickable {
+                        triggerHaptic(context)
+                        if (engine.forceUnlockAllModels) {
+                            engine.forceUnlockAllModels = false
+                            onForceRefresh()
+                        } else {
+                            onTriggerEasterEgg()
+                        }
+                    }
+                    .padding(horizontal = 12.dp, vertical = 7.dp)
+            ) {
+                Text(
+                    text = if (engine.forceUnlockAllModels) "Reverrouiller" else "Débloquer",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (engine.forceUnlockAllModels) Color.White else AppleOrange
+                )
+            }
+        }
+
+        downloader.errorMessage?.let { dlErr ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color.White.copy(alpha = 0.04f))
+                    .padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(text = "⚠️", fontSize = 13.sp)
+                Text(text = dlErr, fontSize = 12.sp, color = AppleRed)
+            }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            WhisperModelTier.entries.forEach { tier ->
+                ModelTierCardView(
+                    context = context,
+                    tier = tier,
+                    engine = engine,
+                    downloader = downloader,
+                    onTriggerEasterEgg = onTriggerEasterEgg,
+                    onForceRefresh = onForceRefresh
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModelTierCardView(
+    context: Context,
+    tier: WhisperModelTier,
+    engine: WhisperAndroidEngine,
+    downloader: ModelDownloader,
+    onTriggerEasterEgg: () -> Unit,
+    onForceRefresh: () -> Unit
+) {
+    val isUnlocked = HardwareDetector.isTierUnlocked(
+        context = context,
+        tier = tier,
+        simulate4GB = engine.simulateModest4GBDevice,
+        forceUnlock = engine.forceUnlockAllModels
+    )
+    val isSelected = (engine.selectedModel == tier)
+    val isDownloaded = downloader.isModelDownloaded(tier)
+    val isDownloading = downloader.isDownloading(tier)
+    val progress = downloader.downloadProgress[tier] ?: 0f
+    val isRecommended = (HardwareDetector.recommendedTier(context, engine.simulateModest4GBDevice) == tier)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(InnerBoxColor)
+            .border(
+                width = 1.dp,
+                color = if (isSelected && isUnlocked) AppleBlue.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.06f),
+                shape = RoundedCornerShape(14.dp)
+            )
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Top
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = tier.displayName,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isUnlocked) Color.White else Color.White.copy(alpha = 0.45f)
+                    )
+                    if (isRecommended && isUnlocked) {
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(AppleBlue.copy(alpha = 0.22f))
+                                .padding(horizontal = 7.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "Recommandé",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = AppleBlue
+                            )
+                        }
+                    }
+                }
+                Text(
+                    text = tier.subtitle,
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = if (isUnlocked) 0.60f else 0.38f)
+                )
+            }
+
+            if (!isUnlocked) {
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(AppleOrange.copy(alpha = 0.16f))
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = "🔒 ${tier.requiredRAMBadgeText}",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AppleOrange
+                    )
+                }
+            } else if (isDownloaded) {
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.07f))
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = "Téléchargé",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = AppleGreen
+                    )
+                }
+            }
+        }
+
+        // Ligne de télémétrie Disque / RAM / Latence
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            val specColor = Color.White.copy(alpha = if (isUnlocked) 0.55f else 0.35f)
+            Text(
+                text = "💾 ${tier.sizeMB} Mo",
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                color = specColor
+            )
+            Text(
+                text = "🧠 ${tier.ramUsageMB} Mo RAM",
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                color = specColor
+            )
+            Text(
+                text = "⚡ ${tier.latencyDescription}",
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                color = specColor
+            )
+        }
+
+        if (isDownloading) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(5.dp)
+                        .clip(CircleShape),
+                    color = AppleBlue,
+                    trackColor = Color.White.copy(alpha = 0.12f)
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Téléchargement : ${(progress * 100f).roundToInt()} %",
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color.White.copy(alpha = 0.75f),
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = "Annuler",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = AppleRed,
+                        modifier = Modifier.clickable {
+                            downloader.cancelDownload(tier)
+                            onForceRefresh()
+                        }
+                    )
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            if (!isUnlocked) {
+                Text(
+                    text = "🔒 Verrouillé par sécurité matérielle (${tier.requiredRAMBadgeText}) • Forcer le déblocage ?",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = AppleOrange,
+                    modifier = Modifier.clickable {
+                        triggerHaptic(context)
+                        onTriggerEasterEgg()
+                    }
+                )
+            } else if (isDownloaded) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (isSelected) AppleBlue else Color.White.copy(alpha = 0.08f))
+                        .clickable {
+                            triggerHaptic(context)
                             engine.selectedModel = tier
                             engine.loadModel(tier)
-                            refreshModelsList()
+                            onForceRefresh()
                         }
-                    }
+                        .padding(horizontal = 12.dp, vertical = 7.dp)
+                ) {
+                    Text(
+                        text = if (isSelected) "✓ Modèle actif" else "○ Utiliser ce modèle",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White
+                    )
+                }
 
-                    val delBtn = TextView(this).apply {
-                        text = "Supprimer"
-                        setTextColor(Color.parseColor("#FF453A"))
-                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-                        typeface = Typeface.DEFAULT_BOLD
-                        gravity = Gravity.CENTER
-                        setPadding(dp(12), dp(9), dp(12), dp(9))
-                        background = CosmicUiFactory.roundedCardDrawable(this@MainActivity, "#1AFF453A", 10, "#33FF453A")
-                        setOnClickListener {
+                Spacer(modifier = Modifier.weight(1f))
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.White.copy(alpha = 0.06f))
+                        .clickable {
+                            triggerHaptic(context)
                             if (engine.selectedModel == tier) {
                                 engine.unloadCurrentModel()
                             }
                             downloader.deleteModel(tier)
+                            onForceRefresh()
                         }
-                    }
-
-                    btnRow.addView(useBtn)
-                    btnRow.addView(delBtn)
-                } else {
-                    val dlBtn = TextView(this).apply {
-                        text = "⬇ Télécharger ${tier.shortBadgeName} (${tier.sizeMB} Mo)"
-                        setTextColor(Color.WHITE)
-                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
-                        typeface = Typeface.DEFAULT_BOLD
-                        gravity = Gravity.CENTER
-                        setPadding(dp(14), dp(10), dp(14), dp(10))
-                        background = CosmicUiFactory.roundedCardDrawable(this@MainActivity, "#1C2233", 10, "#38BDF8")
-                        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                        setOnClickListener {
-                            downloader.downloadModel(tier) { completedTier ->
-                                engine.selectedModel = completedTier
-                                engine.loadModel(completedTier)
+                        .padding(horizontal = 9.dp, vertical = 7.dp)
+                ) {
+                    Text(
+                        text = "🗑",
+                        fontSize = 12.sp,
+                        color = Color.White.copy(alpha = 0.65f)
+                    )
+                }
+            } else if (!isDownloading) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.White.copy(alpha = 0.09f))
+                        .clickable {
+                            triggerHaptic(context)
+                            downloader.downloadModel(tier) { finished ->
+                                engine.selectedModel = finished
+                                engine.loadModel(finished)
+                                onForceRefresh()
                             }
+                            onForceRefresh()
                         }
+                        .padding(horizontal = 12.dp, vertical = 7.dp)
+                ) {
+                    Text(
+                        text = "⬇ Télécharger (${tier.sizeMB} Mo)",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White
+                    )
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Carte 3 : Mémoire d'Écriture JSON (user_style_memory.json)
+
+@Composable
+private fun CardStyleMemorySection(
+    context: Context,
+    engine: WhisperAndroidEngine,
+    styleMemory: UserStyleMemoryManager,
+    newSpokenPhrase: String,
+    onNewSpokenChange: (String) -> Unit,
+    newWrittenReplacement: String,
+    onNewWrittenChange: (String) -> Unit,
+    showRawJSONPreview: Boolean,
+    onToggleRawJSON: () -> Unit,
+    showJSONCopiedToast: Boolean,
+    onShowJSONCopied: (Boolean) -> Unit,
+    onForceRefresh: () -> Unit
+) {
+    val activeLangCode = engine.selectedLanguage.effectiveStyleLanguageCode
+    val entries = styleMemory.getReplacementsForLanguage(activeLangCode)
+
+    AppleCardSurface {
+        CardSectionHeader(
+            iconText = "✍️",
+            title = "Mémoire d'Écriture (user_style_memory.json)",
+            subtitle = "Adapte les abréviations et la ponctuation à votre façon d'écrire (${activeLangCode.uppercase(Locale.ROOT)})"
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Activer le profil user_style_memory.json",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color.White,
+                modifier = Modifier.weight(1f)
+            )
+            Switch(
+                checked = styleMemory.isMemoryEnabled,
+                onCheckedChange = {
+                    styleMemory.isMemoryEnabled = it
+                    styleMemory.saveToDisk()
+                    onForceRefresh()
+                },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = AppleGreen
+                )
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = "Retirer le point final sur les petits messages",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.White
+                )
+                Text(
+                    text = "Évite le '.' automatique sur les SMS de ≤ ${styleMemory.shortMessageMaxWords} mots",
+                    fontSize = 11.sp,
+                    color = Color.White.copy(alpha = 0.55f)
+                )
+            }
+            Switch(
+                checked = styleMemory.stripTrailingPeriodOnShortMessages,
+                onCheckedChange = {
+                    styleMemory.stripTrailingPeriodOnShortMessages = it
+                    styleMemory.saveToDisk()
+                    onForceRefresh()
+                },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = AppleBlue
+                )
+            )
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "Abréviations personnelles (${activeLangCode.uppercase(Locale.ROOT)})",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White.copy(alpha = 0.75f)
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = newSpokenPhrase,
+                    onValueChange = onNewSpokenChange,
+                    placeholder = {
+                        Text(
+                            text = "Mot dicté (ex: t'inquiète)",
+                            fontSize = 12.sp,
+                            color = Color.White.copy(alpha = 0.40f)
+                        )
+                    },
+                    singleLine = true,
+                    textStyle = TextStyle(fontSize = 12.sp, color = Color.White),
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = InnerBoxColor,
+                        unfocusedContainerColor = InnerBoxColor,
+                        focusedBorderColor = AppleBlue,
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.08f)
+                    )
+                )
+
+                Text(text = "→", color = Color.White.copy(alpha = 0.5f), fontSize = 14.sp)
+
+                OutlinedTextField(
+                    value = newWrittenReplacement,
+                    onValueChange = onNewWrittenChange,
+                    placeholder = {
+                        Text(
+                            text = "Écrit (ex: tkt)",
+                            fontSize = 12.sp,
+                            color = Color.White.copy(alpha = 0.40f)
+                        )
+                    },
+                    singleLine = true,
+                    textStyle = TextStyle(fontSize = 12.sp, color = Color.White),
+                    modifier = Modifier.width(115.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = InnerBoxColor,
+                        unfocusedContainerColor = InnerBoxColor,
+                        focusedBorderColor = AppleBlue,
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.08f)
+                    )
+                )
+
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(AppleBlue)
+                        .clickable {
+                            if (newSpokenPhrase.isNotBlank() && newWrittenReplacement.isNotBlank()) {
+                                styleMemory.setReplacement(newSpokenPhrase, newWrittenReplacement, activeLangCode)
+                                onNewSpokenChange("")
+                                onNewWrittenChange("")
+                                onForceRefresh()
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(text = "+", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                entries.forEach { (spoken, written) ->
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(InnerBoxColor)
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "« $spoken » → $written",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            fontFamily = FontFamily.Monospace,
+                            color = Color.White
+                        )
+                        Text(
+                            text = "✕",
+                            fontSize = 11.sp,
+                            color = Color.White.copy(alpha = 0.45f),
+                            modifier = Modifier.clickable {
+                                styleMemory.removeReplacement(spoken, activeLangCode)
+                                onForceRefresh()
+                            }
+                        )
                     }
-                    btnRow.addView(dlBtn)
                 }
-                itemBox.addView(btnRow)
-            }
-
-            modelsContainerLayout.addView(itemBox)
-            modelsContainerLayout.addView(space(dp(10)))
-        }
-    }
-
-    // MARK: - Carte 3 : Mémoire d'Écriture JSON (user_style_memory.json)
-
-    private fun buildCard3StyleMemorySection(): View {
-        val card = createCosmicCard()
-        val activeLang = engine.selectedLanguage.effectiveStyleLanguageCode.uppercase()
-
-        card.addView(
-            createCardHeader(
-                icon = "📝",
-                title = "Mémoire d'Écriture (user_style_memory.json)",
-                subtitle = "Dictionnaire JSON local d'abréviations par langue ($activeLang) partagé avec la dictée et le correcteur IA"
-            )
-        )
-        card.addView(space(dp(12)))
-
-        card.addView(
-            CosmicUiFactory.createSettingSwitchRow(
-                context = this,
-                title = "Activer user_style_memory.json",
-                subtitle = "Remplace automatiquement vos expressions en < 0,05 ms avec 0 % de risque d'hallucination",
-                initialChecked = styleMemory.isMemoryEnabled,
-                activeColorHex = "#30D158"
-            ) { checked ->
-                styleMemory.isMemoryEnabled = checked
-                styleMemory.saveToDisk()
-            }
-        )
-        card.addView(space(dp(8)))
-
-        card.addView(
-            CosmicUiFactory.createSettingSwitchRow(
-                context = this,
-                title = "Messages courts sans point final '.'",
-                subtitle = "Retire le point final sur les messages de 12 mots ou moins (style SMS / WhatsApp)",
-                initialChecked = styleMemory.stripTrailingPeriodOnShortMessages,
-                activeColorHex = "#0A84FF"
-            ) { checked ->
-                styleMemory.stripTrailingPeriodOnShortMessages = checked
-                styleMemory.saveToDisk()
-            }
-        )
-        card.addView(space(dp(12)))
-
-        // Ajout d'une règle personnalisée
-        val addRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-
-        val spokenInput = EditText(this).apply {
-            hint = "Mot dicté (ex: t'inquiète)"
-            setHintTextColor(Color.parseColor("#66FFFFFF"))
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-            background = CosmicUiFactory.roundedCardDrawable(this@MainActivity, "#0A0C12", 10, "#20FFFFFF")
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        }
-
-        val writtenInput = EditText(this).apply {
-            hint = "Écrit (tkt)"
-            setHintTextColor(Color.parseColor("#66FFFFFF"))
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-            background = CosmicUiFactory.roundedCardDrawable(this@MainActivity, "#0A0C12", 10, "#20FFFFFF")
-            layoutParams = LinearLayout.LayoutParams(dp(96), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                marginStart = dp(6)
-                marginEnd = dp(6)
             }
         }
 
-        val addBtn = TextView(this).apply {
-            text = "+ Ajouter"
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            setPadding(dp(14), dp(11), dp(14), dp(11))
-            background = CosmicUiFactory.roundedCardDrawable(this@MainActivity, "#0A84FF", 10, "#55FFFFFF")
-            setOnClickListener {
-                val lang = engine.selectedLanguage.effectiveStyleLanguageCode
-                styleMemory.setReplacement(
-                    spoken = spokenInput.text.toString(),
-                    written = writtenInput.text.toString(),
-                    languageCode = lang
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            SmallActionChip(
+                label = if (showRawJSONPreview) "{ } Masquer JSON" else "{ } Voir JSON",
+                textColor = Color.White
+            ) {
+                onToggleRawJSON()
+            }
+
+            SmallActionChip(
+                label = if (showJSONCopiedToast) "✓ JSON copié" else "📋 Exporter JSON",
+                textColor = if (showJSONCopiedToast) AppleGreen else Color.White
+            ) {
+                copyToClipboard(context, styleMemory.prettyJSONString())
+                onShowJSONCopied(true)
+            }
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            SmallActionChip(
+                label = "Réinitialiser",
+                textColor = Color.White.copy(alpha = 0.65f)
+            ) {
+                styleMemory.resetToDefaults()
+                onForceRefresh()
+            }
+        }
+
+        AnimatedVisibility(visible = showRawJSONPreview) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(InnerBoxColor)
+                    .padding(10.dp)
+            ) {
+                Text(
+                    text = styleMemory.prettyJSONString(),
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = AppleGreen
                 )
-                spokenInput.setText("")
-                writtenInput.setText("")
-                refreshStyleReplacementsList()
             }
         }
-
-        addRow.addView(spokenInput)
-        addRow.addView(writtenInput)
-        addRow.addView(addBtn)
-        card.addView(addRow)
-        card.addView(space(dp(10)))
-
-        styleReplacementsContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-        card.addView(styleReplacementsContainer)
-        card.addView(space(dp(8)))
-
-        rawJsonPreviewText = TextView(this).apply {
-            setTextColor(Color.parseColor("#30D158"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
-            typeface = Typeface.MONOSPACE
-            setPadding(dp(12), dp(12), dp(12), dp(12))
-            background = CosmicUiFactory.roundedCardDrawable(this@MainActivity, "#090B10", 12, "#2230D158")
-            visibility = View.GONE
-        }
-
-        val jsonBtnRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-        }
-
-        val toggleJsonBtn = TextView(this).apply {
-            text = "{ } Voir user_style_memory.json"
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            setPadding(dp(12), dp(9), dp(12), dp(9))
-            background = CosmicUiFactory.roundedCardDrawable(this@MainActivity, "#14FFFFFF", 10, "#24FFFFFF")
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginEnd = dp(6)
-            }
-            setOnClickListener {
-                rawJsonPreviewText.text = styleMemory.prettyJSONString()
-                rawJsonPreviewText.visibility = if (rawJsonPreviewText.visibility == View.VISIBLE) View.GONE else View.VISIBLE
-            }
-        }
-
-        val copyJsonBtn = TextView(this).apply {
-            text = "Copier JSON"
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            setPadding(dp(14), dp(9), dp(14), dp(9))
-            background = CosmicUiFactory.roundedCardDrawable(this@MainActivity, "#14FFFFFF", 10, "#24FFFFFF")
-            setOnClickListener {
-                val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                cm?.setPrimaryClip(ClipData.newPlainText("user_style_memory.json", styleMemory.prettyJSONString()))
-                Toast.makeText(this@MainActivity, "user_style_memory.json copié !", Toast.LENGTH_SHORT).show()
-            }
-        }
-
-        jsonBtnRow.addView(toggleJsonBtn)
-        jsonBtnRow.addView(copyJsonBtn)
-        card.addView(jsonBtnRow)
-        card.addView(space(dp(8)))
-        card.addView(rawJsonPreviewText)
-
-        refreshStyleReplacementsList()
-        return card
     }
 
-    private fun refreshStyleReplacementsList() {
-        if (!::styleReplacementsContainer.isInitialized) return
-        styleReplacementsContainer.removeAllViews()
+    LaunchedEffect(showJSONCopiedToast) {
+        if (showJSONCopiedToast) {
+            delay(2000L)
+            onShowJSONCopied(false)
+        }
+    }
+}
 
-        val lang = engine.selectedLanguage.effectiveStyleLanguageCode
-        val pairs = styleMemory.getReplacementsForLanguage(lang)
+// MARK: - Carte 4 : Apparence de l'Orbe (32 Couleurs, Éclipse, Perle, ColorPickers & Recherche)
 
-        for ((spoken, written) in pairs) {
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(12), dp(8), dp(12), dp(8))
-                background = CosmicUiFactory.roundedCardDrawable(this@MainActivity, "#0B0D14", 10, "#16FFFFFF")
-            }
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun Card3AppearanceStudioSection(
+    engine: WhisperAndroidEngine,
+    colorSearchText: String,
+    onColorSearchChange: (String) -> Unit,
+    onOpenCustomPicker: (Boolean) -> Unit,
+    onForceRefresh: () -> Unit
+) {
+    AppleCardSurface {
+        CardSectionHeader(
+            iconText = "🎨",
+            title = "Apparence de l'Orbe",
+            subtitle = "Couleur de l'onde, fond de la sphère et thèmes spéciaux"
+        )
 
-            val label = TextView(this).apply {
-                text = "« $spoken »   →   $written"
-                setTextColor(Color.WHITE)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
-                typeface = Typeface.MONOSPACE
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            }
+        // 1. Fond de la sphère (5 presets + ColorPicker personnalisé)
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "Fond de la sphère",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color.White.copy(alpha = 0.70f)
+            )
 
-            val del = TextView(this).apply {
-                text = "✕"
-                setTextColor(Color.parseColor("#FF453A"))
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f)
-                typeface = Typeface.DEFAULT_BOLD
-                setPadding(dp(10), dp(2), dp(4), dp(2))
-                setOnClickListener {
-                    styleMemory.removeReplacement(spoken, lang)
-                    refreshStyleReplacementsList()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                ThemeColors.orderedBackgrounds.forEach { preset ->
+                    val isCurrentBg = engine.bgHex.equals(preset.hex, ignoreCase = true)
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(Color.White.copy(alpha = if (isCurrentBg) 0.16f else 0.05f))
+                            .clickable {
+                                engine.bgHex = preset.hex
+                                onForceRefresh()
+                            }
+                            .padding(horizontal = 11.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(7.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(16.dp)
+                                .clip(CircleShape)
+                                .background(ThemeColors.composeColor(preset.hex))
+                                .border(0.8.dp, Color.White.copy(alpha = 0.30f), CircleShape)
+                        )
+                        Text(
+                            text = preset.name,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color.White
+                        )
+                    }
                 }
             }
 
-            row.addView(label)
-            row.addView(del)
-            styleReplacementsContainer.addView(row)
-            styleReplacementsContainer.addView(space(dp(6)))
-        }
-    }
-
-    // MARK: - Carte 4 : Studio d'Apparence de l'Orbe 3D
-
-    private fun buildCard4AppearanceStudioSection(): View {
-        val card = createCosmicCard()
-        card.addView(
-            createCardHeader(
-                icon = "🎨",
-                title = "Studio d'Apparence de l'Orbe 3D",
-                subtitle = "Thèmes Éclipse (Trou Noir), Perle et couleurs de l'onde lumineuse synchronisées avec le clavier"
-            )
-        )
-        card.addView(space(dp(12)))
-
-        val presets = listOf(
-            Triple("🕳️ Éclipse (Noir)", "#050507", "#050507"),
-            Triple("⚪ Perle (Blanc)", "#F8F9FA", "#FFFFFF"),
-            Triple("🔵 Bleu Siri", "#08080C", "#0088FF"),
-            Triple("💎 Cyan", "#08080C", "#00E5FF"),
-            Triple("🟣 Violet", "#08080C", "#8A2BE2"),
-            Triple("🟢 Émeraude", "#08080C", "#10B981"),
-            Triple("🟡 Or", "#08080C", "#F59E0B"),
-            Triple("🌸 Rose", "#08080C", "#FF2A85"),
-            Triple("🔴 Rouge", "#08080C", "#EF4444")
-        )
-
-        val hScroll = HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
-        }
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-        }
-
-        for ((label, bg, fg) in presets) {
-            val isLight = (bg == "#F8F9FA")
-            val swatch = TextView(this).apply {
-                text = label
-                setTextColor(if (isLight) Color.BLACK else Color.WHITE)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
-                typeface = Typeface.DEFAULT_BOLD
-                setPadding(dp(14), dp(10), dp(14), dp(10))
-                background = CosmicUiFactory.roundedCardDrawable(
-                    this@MainActivity,
-                    if (isLight) "#F8F9FA" else "#0C0E15",
-                    12,
-                    if (fg == "#050507") "#44FFFFFF" else fg,
-                    2
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenCustomPicker(true) }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Couleur de fond personnalisée (${engine.bgHex.uppercase(Locale.ROOT)})",
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.75f),
+                    modifier = Modifier.weight(1f)
                 )
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply { marginEnd = dp(8) }
-                setOnClickListener {
-                    engine.bgHex = bg
-                    engine.fgHex = fg
+                Box(
+                    modifier = Modifier
+                        .size(24.dp)
+                        .clip(CircleShape)
+                        .background(ThemeColors.composeColor(engine.bgHex))
+                        .border(1.dp, Color.White.copy(alpha = 0.45f), CircleShape)
+                )
+            }
+        }
+
+        HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+
+        // 2. Couleur de l'onde (16 presets en grille + Éclipse & Perle + ColorPicker personnalisé)
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                text = "Couleur de l'onde",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color.White.copy(alpha = 0.70f)
+            )
+
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                ThemeColors.orderedForegrounds.forEach { preset ->
+                    val isCurrentFg = engine.fgHex.equals(preset.hex, ignoreCase = true)
+                    Column(
+                        modifier = Modifier
+                            .width(54.dp)
+                            .clickable {
+                                engine.fgHex = preset.hex
+                                onForceRefresh()
+                            },
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(30.dp)
+                                .clip(CircleShape)
+                                .background(ThemeColors.composeColor(preset.hex))
+                                .border(
+                                    width = if (isCurrentFg) 2.dp else 0.8.dp,
+                                    color = if (isCurrentFg) Color.White else Color.White.copy(alpha = 0.20f),
+                                    shape = CircleShape
+                                )
+                        )
+                        Text(
+                            text = preset.name.substringBefore(" "),
+                            fontSize = 10.sp,
+                            color = if (isCurrentFg) Color.White else Color.White.copy(alpha = 0.60f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
-            row.addView(swatch)
+
+            // Boutons côte-à-côte Éclipse (Noir sur Noir) & Perle (Blanc sur Blanc)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(InnerBoxColor)
+                        .border(0.8.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(9.dp))
+                        .clickable {
+                            engine.bgHex = "#050507"
+                            engine.fgHex = "#050507"
+                            onForceRefresh()
+                        }
+                        .padding(vertical = 9.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Éclipse (Noir sur Noir)",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(Color(0xFFF8F9FA))
+                        .clickable {
+                            engine.bgHex = "#F8F9FA"
+                            engine.fgHex = "#FFFFFF"
+                            onForceRefresh()
+                        }
+                        .padding(vertical = 9.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Perle (Blanc sur Blanc)",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color(0xFF1C1C1E)
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenCustomPicker(false) }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Couleur d'onde personnalisée (${engine.fgHex.uppercase(Locale.ROOT)})",
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.75f),
+                    modifier = Modifier.weight(1f)
+                )
+                Box(
+                    modifier = Modifier
+                        .size(24.dp)
+                        .clip(CircleShape)
+                        .background(ThemeColors.composeColor(engine.fgHex))
+                        .border(1.dp, Color.White.copy(alpha = 0.45f), CircleShape)
+                )
+            }
         }
 
-        hScroll.addView(row)
-        card.addView(hScroll)
-        return card
+        HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+
+        // 3. Barre de recherche intelligente de couleur (140+ noms FR/EN ou code Hex)
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                value = colorSearchText,
+                onValueChange = onColorSearchChange,
+                placeholder = {
+                    Text(
+                        text = "🔍 Rechercher une couleur (ex: turquoise, or, #FF0055)...",
+                        fontSize = 12.sp,
+                        color = Color.White.copy(alpha = 0.45f)
+                    )
+                },
+                singleLine = true,
+                textStyle = TextStyle(fontSize = 13.sp, color = Color.White),
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(10.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = InnerBoxColor,
+                    unfocusedContainerColor = InnerBoxColor,
+                    focusedBorderColor = AppleBlue,
+                    unfocusedBorderColor = Color.White.copy(alpha = 0.08f)
+                )
+            )
+
+            val parsedHex = ThemeColors.parseColorInput(colorSearchText)
+            if (parsedHex != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color.White.copy(alpha = 0.04f))
+                        .padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(26.dp)
+                            .clip(CircleShape)
+                            .background(ThemeColors.composeColor(parsedHex))
+                            .border(1.dp, Color.White.copy(alpha = 0.35f), CircleShape)
+                    )
+
+                    Text(
+                        text = "${ThemeColors.displayName(parsedHex)} ($parsedHex)",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(7.dp))
+                            .background(AppleBlue)
+                            .clickable {
+                                engine.fgHex = parsedHex
+                                onForceRefresh()
+                            }
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = "Onde",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(7.dp))
+                            .background(Color.White.copy(alpha = 0.12f))
+                            .clickable {
+                                engine.bgHex = parsedHex
+                                onForceRefresh()
+                            }
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = "Fond",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Carte 5 : Préférences & Commandes Vocales
+
+@Composable
+private fun Card4PreferencesAndVoiceCommands(
+    engine: WhisperAndroidEngine,
+    onForceRefresh: () -> Unit
+) {
+    var sliderVal by remember(engine.vadSilenceThresholdSeconds) {
+        mutableFloatStateOf(engine.vadSilenceThresholdSeconds)
     }
 
-    // MARK: - Carte 5 : Écosystème Multi-Plateforme & Dépôt GitHub v2.0.0
+    AppleCardSurface {
+        CardSectionHeader(
+            iconText = "⚙️",
+            title = "Préférences & Commandes Vocales",
+            subtitle = "Ponctuation automatique, détection de fin de phrase et commandes"
+        )
 
-    private fun buildCard5EcosystemAndGitHubSection(): View {
-        val card = createCosmicCard()
-        card.addView(
-            createCardHeader(
-                icon = "🚀",
-                title = "Écosystème Unifié v2.0.0",
-                subtitle = "Apple (iPhone, iPad, Mac) • Android • Tablettes • Chromebook Plus • Googlebook 14"
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = "Espace automatique après chaque phrase",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.White
+                )
+                Text(
+                    text = "Sépare proprement les phrases dictées à la suite",
+                    fontSize = 11.sp,
+                    color = Color.White.copy(alpha = 0.55f)
+                )
+            }
+            Switch(
+                checked = engine.autoSpaceAfterSentence,
+                onCheckedChange = {
+                    engine.autoSpaceAfterSentence = it
+                    onForceRefresh()
+                },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = AppleGreen
+                )
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = "Majuscule et ponctuation automatiques",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.White
+                )
+                Text(
+                    text = "Ajoute majuscules et points en fin de phrase",
+                    fontSize = 11.sp,
+                    color = Color.White.copy(alpha = 0.55f)
+                )
+            }
+            Switch(
+                checked = engine.autoPunctuation,
+                onCheckedChange = {
+                    engine.autoPunctuation = it
+                    onForceRefresh()
+                },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = AppleBlue
+                )
+            )
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Délai de pause automatique (VAD)",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.White,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = String.format(Locale.US, "%.2f s", sliderVal),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    fontFamily = FontFamily.Monospace,
+                    color = Color.White.copy(alpha = 0.80f)
+                )
+            }
+
+            Slider(
+                value = sliderVal,
+                onValueChange = {
+                    sliderVal = it
+                    engine.vadSilenceThresholdSeconds = it
+                },
+                valueRange = 0.45f..2.0f,
+                colors = SliderDefaults.colors(
+                    thumbColor = Color.White,
+                    activeTrackColor = AppleBlue,
+                    inactiveTrackColor = Color.White.copy(alpha = 0.15f)
+                )
+            )
+        }
+
+        HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                text = "Commandes vocales disponibles (FR / EN)",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color.White.copy(alpha = 0.70f)
+            )
+            VoiceCommandRow(spoken = "« À la ligne » / « New line »", result = "Saut de ligne")
+            VoiceCommandRow(spoken = "« Effacer la dernière phrase » / « Delete last sentence »", result = "Annule la dictée")
+            VoiceCommandRow(spoken = "« Point d'interrogation » / « Question mark »", result = "Insère ?")
+            VoiceCommandRow(spoken = "« Point d'exclamation » / « Exclamation mark »", result = "Insère !")
+        }
+    }
+}
+
+@Composable
+private fun VoiceCommandRow(spoken: String, result: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(InnerBoxColor)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = spoken,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            color = Color.White.copy(alpha = 0.88f),
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            text = result,
+            fontSize = 11.sp,
+            color = Color.White.copy(alpha = 0.55f)
+        )
+    }
+}
+
+// MARK: - Carte 6 : Partage GitHub, QR Code & Guide d'Incrustation Gboard 1-2-3-4
+
+@Composable
+private fun Card5GitHubAndSetupSection(
+    context: Context,
+    isServiceActive: Boolean,
+    showRepoCopiedToast: Boolean,
+    onShowRepoCopied: (Boolean) -> Unit
+) {
+    val githubRepoURL = "https://github.com/bluewolfy24yt/WhisperOrb"
+    val githubReleasesURL = "https://github.com/bluewolfy24yt/WhisperOrb/releases/latest"
+    val qrBitmap = remember { generateQrCodeBitmap(githubReleasesURL, 320) }
+
+    AppleCardSurface {
+        CardSectionHeader(
+            iconText = "📱",
+            title = "Partage & Installation (v2.0.0)",
+            subtitle = "Disponible pour Apple (iPhone, iPad, Mac) et Android (.apk avec Gboard intégré)"
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            if (qrBitmap != null) {
+                Box(
+                    modifier = Modifier
+                        .size(104.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color.White)
+                        .padding(6.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Image(
+                        bitmap = qrBitmap.asImageBitmap(),
+                        contentDescription = "QR Code GitHub Releases",
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
+
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "Releases GitHub v2.0.0 (.ipa & .apk)",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White
+                )
+
+                Text(
+                    text = githubRepoURL,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = Color.White.copy(alpha = 0.60f),
+                    maxLines = 2
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SmallActionChip(
+                        label = if (showRepoCopiedToast) "✓ Copié" else "🔗 Copier",
+                        textColor = if (showRepoCopiedToast) AppleGreen else Color.White
+                    ) {
+                        copyToClipboard(context, githubRepoURL)
+                        onShowRepoCopied(true)
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(AppleBlue)
+                            .clickable {
+                                context.startActivity(
+                                    Intent(Intent.ACTION_VIEW, Uri.parse(githubRepoURL)).apply {
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                )
+                            }
+                            .padding(horizontal = 10.dp, vertical = 7.dp)
+                    ) {
+                        Text(
+                            text = "GitHub ↗",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color.White
+                        )
+                    }
+                }
+            }
+        }
+
+        HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+
+        // Guide 1-2-3-4 d'incrustation sur le vrai Gboard
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                text = "Guide d'incrustation Gboard en 4 étapes",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White.copy(alpha = 0.80f)
+            )
+            SetupStepItem(
+                num = "1",
+                text = "Gardez votre vrai clavier Gboard actif par défaut sur Android."
+            )
+            SetupStepItem(
+                num = "2",
+                text = if (isServiceActive) {
+                    "✓ Service WhisperOrb Gboard actif ! Le bandeau s'affiche automatiquement au-dessus de Gboard."
+                } else {
+                    "Activez « WhisperOrb — Orbe IA Incrusté Gboard » dans Paramètres → Accessibilité."
+                }
+            )
+            SetupStepItem(
+                num = "3",
+                text = "Touchez « ⚙ » sur la barre pour remplacer les touches Gboard par le panneau WhisperOrb."
+            )
+            SetupStepItem(
+                num = "4",
+                text = "Touchez « ▾ Réduire » pour rétracter Gboard et ne garder que la barre vocale en bas !"
+            )
+        }
+    }
+
+    LaunchedEffect(showRepoCopiedToast) {
+        if (showRepoCopiedToast) {
+            delay(2000L)
+            onShowRepoCopied(false)
+        }
+    }
+}
+
+@Composable
+private fun SetupStepItem(num: String, text: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(InnerBoxColor)
+            .padding(horizontal = 10.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(20.dp)
+                .clip(CircleShape)
+                .background(AppleBlue.copy(alpha = 0.22f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = num,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = AppleBlue
+            )
+        }
+        Text(
+            text = text,
+            fontSize = 11.5.sp,
+            color = Color.White.copy(alpha = 0.85f),
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+// MARK: - Modal Easter Egg des 7 Messages d'Avertissement (Parité 1:1 avec ContentView.swift)
+
+@Composable
+private fun EasterEggWarningModalOverlay(
+    stepIndex: Int,
+    isEnglish: Boolean,
+    onCancel: () -> Unit,
+    onConfirmStep: () -> Unit
+) {
+    val allSteps = EasterEggUnlockStep.allSteps
+    val safeIdx = stepIndex.coerceIn(0, allSteps.lastIndex)
+    val step = allSteps[safeIdx]
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.78f))
+            .clickable { onCancel() },
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(horizontal = 24.dp)
+                .widthIn(max = 420.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(Color(0xFF16161C))
+                .border(1.5.dp, AppleOrange.copy(alpha = 0.45f), RoundedCornerShape(20.dp))
+                .clickable(enabled = false) {}
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = step.localizedTitle(isEnglish),
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (safeIdx == 6) AppleGreen else AppleOrange,
+                    modifier = Modifier.weight(1f)
+                )
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.10f))
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = "${safeIdx + 1}/7",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color.White
+                    )
+                }
+            }
+
+            Text(
+                text = step.localizedMessage(isEnglish),
+                fontSize = 14.sp,
+                color = Color.White.copy(alpha = 0.90f),
+                lineHeight = 20.sp
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Button(
+                    onClick = onCancel,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color.White.copy(alpha = 0.10f),
+                        contentColor = Color.White
+                    ),
+                    contentPadding = PaddingValues(vertical = 10.dp)
+                ) {
+                    Text(
+                        text = step.localizedCancel(isEnglish),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                Button(
+                    onClick = onConfirmStep,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (safeIdx == 6) AppleGreen else AppleRed,
+                        contentColor = Color.White
+                    ),
+                    contentPadding = PaddingValues(vertical = 10.dp)
+                ) {
+                    Text(
+                        text = step.localizedConfirm(isEnglish),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Sélecteur de Couleur Personnalisée RGB / Hex (Équivalent SwiftUI ColorPicker)
+
+@Composable
+private fun CustomColorPickerDialog(
+    title: String,
+    initialHex: String,
+    onDismiss: () -> Unit,
+    onColorSelected: (String) -> Unit
+) {
+    val (initR, initG, initB) = ThemeColors.rgbComponents(initialHex)
+    var r by remember { mutableFloatStateOf(initR.toFloat()) }
+    var g by remember { mutableFloatStateOf(initG.toFloat()) }
+    var b by remember { mutableFloatStateOf(initB.toFloat()) }
+
+    val currentHex = String.format(
+        Locale.US,
+        "#%02X%02X%02X",
+        (r * 255f).roundToInt().coerceIn(0, 255),
+        (g * 255f).roundToInt().coerceIn(0, 255),
+        (b * 255f).roundToInt().coerceIn(0, 255)
+    )
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = Color(0xFF16161C),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.14f))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = title,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(ThemeColors.composeColor(currentHex))
+                            .border(1.5.dp, Color.White.copy(alpha = 0.5f), CircleShape)
+                    )
+                    Text(
+                        text = currentHex,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color.White
+                    )
+                }
+
+                ColorChannelSlider("Rouge (R)", r, AppleRed) { r = it }
+                ColorChannelSlider("Vert (G)", g, AppleGreen) { g = it }
+                ColorChannelSlider("Bleu (B)", b, AppleBlue) { b = it }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Button(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.10f))
+                    ) {
+                        Text("Annuler", color = Color.White)
+                    }
+                    Button(
+                        onClick = { onColorSelected(currentHex) },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = AppleBlue)
+                    ) {
+                        Text("Appliquer", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ColorChannelSlider(
+    label: String,
+    value: Float,
+    tint: Color,
+    onValueChange: (Float) -> Unit
+) {
+    Column {
+        Row(modifier = Modifier.fillMaxWidth()) {
+            Text(text = label, fontSize = 11.sp, color = Color.White.copy(alpha = 0.7f), modifier = Modifier.weight(1f))
+            Text(
+                text = "${(value * 255f).roundToInt()}",
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                color = Color.White
+            )
+        }
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = 0f..1f,
+            colors = SliderDefaults.colors(
+                thumbColor = Color.White,
+                activeTrackColor = tint,
+                inactiveTrackColor = Color.White.copy(alpha = 0.14f)
             )
         )
-        card.addView(space(dp(10)))
+    }
+}
 
-        val specsInfo = TextView(this).apply {
-            text = "✓ Compilation C++ NDK multi-architecture (ARM64 FP16+DotProd & x86_64 AVX2+FMA)\n" +
-                "✓ Compatible Snapdragon X Elite & Intel Core Ultra (Googlebook 14 & Chromebook Plus)\n" +
-                "✓ 100 % Hors-Ligne • Zéro Serveur • Zéro Télémétrie"
-            setTextColor(Color.parseColor("#B3FFFFFF"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-            setLineSpacing(dp(2).toFloat(), 1f)
+// MARK: - Composants Visuels Partagés (Surface #131317, En-tête de Carte, Boutons, QR Code)
+
+@Composable
+private fun AppleCardSurface(content: @Composable () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(CardBgColor)
+            .border(1.dp, Color.White.copy(alpha = 0.07f), RoundedCornerShape(18.dp))
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        content()
+    }
+}
+
+@Composable
+private fun CardSectionHeader(iconText: String, title: String, subtitle: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color.White.copy(alpha = 0.07f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(text = iconText, fontSize = 15.sp)
         }
-        card.addView(specsInfo)
-        card.addView(space(dp(12)))
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = title,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White
+            )
+            Text(
+                text = subtitle,
+                fontSize = 12.sp,
+                color = Color.White.copy(alpha = 0.55f)
+            )
+        }
+    }
+}
 
-        val ghBtn = TextView(this).apply {
-            text = "🌐 Ouvrir github.com/bluewolfy24yt/WhisperOrb (Releases v2.0.0)"
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            setPadding(dp(14), dp(12), dp(14), dp(12))
-            background = CosmicUiFactory.roundedCardDrawable(this@MainActivity, "#0A84FF", 12, "#55FFFFFF")
-            setOnClickListener {
-                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/bluewolfy24yt/WhisperOrb/releases/latest")))
+@Composable
+private fun SmallActionChip(
+    label: String,
+    textColor: Color,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color.White.copy(alpha = 0.07f))
+            .clickable { onClick() }
+            .padding(horizontal = 11.dp, vertical = 7.dp)
+    ) {
+        Text(
+            text = label,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            color = textColor
+        )
+    }
+}
+
+private fun copyToClipboard(context: Context, text: String) {
+    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+    cm?.setPrimaryClip(ClipData.newPlainText("WhisperOrb", text))
+}
+
+private fun triggerHaptic(context: Context) {
+    try {
+        val vib = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vib.vibrate(VibrationEffect.createOneShot(14L, VibrationEffect.DEFAULT_AMPLITUDE))
+        } else {
+            @Suppress("DEPRECATION")
+            vib.vibrate(14L)
+        }
+    } catch (_: Exception) {
+    }
+}
+
+private fun generateQrCodeBitmap(content: String, sizePx: Int): Bitmap? {
+    return try {
+        val hints = mapOf(
+            EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M,
+            EncodeHintType.MARGIN to 1
+        )
+        val matrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, sizePx, sizePx, hints)
+        val w = matrix.width
+        val h = matrix.height
+        val pixels = IntArray(w * h)
+        for (y in 0 until h) {
+            val offset = y * w
+            for (x in 0 until w) {
+                pixels[offset + x] = if (matrix.get(x, y)) AndroidColor.BLACK else AndroidColor.WHITE
             }
         }
-        card.addView(ghBtn)
-        return card
-    }
-
-    // MARK: - Rafraîchissement Temps Réel
-
-    private fun refreshAllDynamicViews() {
-        if (::mainOrbView.isInitialized) {
-            mainOrbView.bgHex = engine.bgHex
-            mainOrbView.fgHex = engine.fgHex
-            mainOrbView.orbState = engine.orbState
-            mainOrbView.audioLevel = engine.currentAudioLevel
+        Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).apply {
+            setPixels(pixels, 0, w, 0, 0, w, h)
         }
-        if (::orbStatusLabel.isInitialized) {
-            orbStatusLabel.text = "${engine.orbState.statusTitle} • ${engine.selectedLanguage.shortPillLabel}"
-        }
-        if (::engineBannerLabel.isInitialized) {
-            val err = engine.lastErrorMessage
-            if (!err.isNullOrBlank()) {
-                engineBannerLabel.text = err
-                engineBannerLabel.setTextColor(Color.parseColor("#FF453A"))
-            } else {
-                engineBannerLabel.text = engine.statusBannerMessage
-                engineBannerLabel.setTextColor(Color.parseColor("#38BDF8"))
-            }
-        }
-        if (::headerStatusDot.isInitialized && ::headerStatusText.isInitialized) {
-            val (dotHex, label) = when (engine.orbState) {
-                WhisperOrbState.IDLE -> "#30D158" to "Prêt"
-                WhisperOrbState.LISTENING -> "#0A84FF" to "Écoute..."
-                WhisperOrbState.TRANSCRIBING -> "#FFD60A" to "C++..."
-            }
-            headerStatusDot.background = circleDrawable(dotHex)
-            headerStatusText.text = label
-        }
-        refreshKeyboardActivationSteps()
-    }
-
-    // MARK: - Helpers Visuels
-
-    private fun createCosmicCard(): LinearLayout {
-        return LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(18), dp(18), dp(18))
-            background = CosmicUiFactory.roundedCardDrawable(this@MainActivity, "#11131B", 20, "#1CFFFFFF")
-        }
-    }
-
-    private fun createCardHeader(icon: String, title: String, subtitle: String): View {
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-
-        val titleRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-
-        val iconBadge = TextView(this).apply {
-            text = icon
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-            gravity = Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(dp(32), dp(32)).apply { marginEnd = dp(10) }
-            background = CosmicUiFactory.roundedCardDrawable(this@MainActivity, "#180A84FF", 10, "#330A84FF")
-        }
-
-        val t = TextView(this).apply {
-            text = title
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16.5f)
-            typeface = Typeface.DEFAULT_BOLD
-        }
-
-        titleRow.addView(iconBadge)
-        titleRow.addView(t)
-
-        val s = TextView(this).apply {
-            text = subtitle
-            setTextColor(Color.parseColor("#99FFFFFF"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-            setPadding(0, dp(5), 0, 0)
-        }
-
-        box.addView(titleRow)
-        box.addView(s)
-        return box
-    }
-
-    private fun circleDrawable(hex: String): GradientDrawable {
-        return GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            setColor(Color.parseColor(hex))
-        }
-    }
-
-    private fun space(px: Int): View {
-        return View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, px)
-        }
-    }
-
-    private fun spaceHorizontal(px: Int): View {
-        return View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(px, ViewGroup.LayoutParams.WRAP_CONTENT)
-        }
-    }
-
-    private fun dp(value: Int): Int {
-        return TypedValue.applyDimension(
-            TypedValue.COMPLEX_UNIT_DIP,
-            value.toFloat(),
-            resources.displayMetrics
-        ).toInt()
+    } catch (_: Exception) {
+        null
     }
 }

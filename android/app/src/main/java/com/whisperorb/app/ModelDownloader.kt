@@ -1,6 +1,8 @@
 package com.whisperorb.app
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -32,14 +34,46 @@ class ModelDownloader private constructor(private val context: Context) {
     var errorMessage: String? = null
     var onStateChanged: (() -> Unit)? = null
 
-    val modelsDir: File
+    /**
+     * Répertoire persistant dans /sdcard/Android/media/com.whisperorb.app/Models/
+     * Survit aux mises à jour d'APK et même aux désinstallations/réinstallations.
+     */
+    @Suppress("DEPRECATION")
+    val persistentMediaModelsDir: File?
+        get() {
+            return try {
+                val base = context.externalMediaDirs?.firstOrNull()
+                    ?: File("/sdcard/Android/media/${context.packageName}")
+                val dir = File(base, "Models")
+                if (!dir.exists()) dir.mkdirs()
+                if (dir.exists() && dir.canWrite()) dir else null
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+    val internalModelsDir: File
         get() {
             val dir = File(context.filesDir, "Models")
             if (!dir.exists()) dir.mkdirs()
             return dir
         }
 
+    val modelsDir: File
+        get() = persistentMediaModelsDir ?: internalModelsDir
+
     fun localModelFile(tier: WhisperModelTier): File {
+        val minValidBytes = 20L * 1024L * 1024L
+        persistentMediaModelsDir?.let { extDir ->
+            val extFile = File(extDir, tier.fileName)
+            if (extFile.exists() && extFile.length() > minValidBytes) {
+                return extFile
+            }
+        }
+        val intFile = File(internalModelsDir, tier.fileName)
+        if (intFile.exists() && intFile.length() > minValidBytes) {
+            return intFile
+        }
         return File(modelsDir, tier.fileName)
     }
 
@@ -52,6 +86,17 @@ class ModelDownloader private constructor(private val context: Context) {
         return activeJobs[tier]?.isActive == true
     }
 
+    fun isOnline(): Boolean {
+        return try {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return true
+            val net = cm.activeNetwork ?: return false
+            val caps = cm.getNetworkCapabilities(net) ?: return false
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        } catch (_: Exception) {
+            true
+        }
+    }
+
     fun downloadModel(tier: WhisperModelTier, onComplete: ((WhisperModelTier) -> Unit)? = null) {
         if (isDownloading(tier)) return
         errorMessage = null
@@ -59,8 +104,9 @@ class ModelDownloader private constructor(private val context: Context) {
         notifyUpdate()
 
         val job = scope.launch {
-            val tempFile = File(modelsDir, "${tier.fileName}.part")
-            val destFile = localModelFile(tier)
+            val targetDir = modelsDir
+            val tempFile = File(targetDir, "${tier.fileName}.part")
+            val destFile = File(targetDir, tier.fileName)
             var conn: HttpURLConnection? = null
             try {
                 val url = URL(tier.downloadURL)
@@ -129,15 +175,15 @@ class ModelDownloader private constructor(private val context: Context) {
         activeJobs[tier]?.cancel()
         activeJobs.remove(tier)
         downloadProgress.remove(tier)
-        val tempFile = File(modelsDir, "${tier.fileName}.part")
-        if (tempFile.exists()) tempFile.delete()
+        persistentMediaModelsDir?.let { File(it, "${tier.fileName}.part").delete() }
+        File(internalModelsDir, "${tier.fileName}.part").delete()
         notifyUpdate()
     }
 
     fun deleteModel(tier: WhisperModelTier) {
         cancelDownload(tier)
-        val f = localModelFile(tier)
-        if (f.exists()) f.delete()
+        persistentMediaModelsDir?.let { File(it, tier.fileName).delete() }
+        File(internalModelsDir, tier.fileName).delete()
         notifyUpdate()
     }
 

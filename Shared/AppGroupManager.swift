@@ -278,9 +278,9 @@ public enum WhisperModelTier: String, CaseIterable, Codable, Identifiable {
         case .normal:
             return 3.6
         case .medium:
-            return 5.4
+            return 3.6
         case .zeroFaute:
-            return 5.4
+            return 3.6
         case .expertPlus:
             return 7.4
         case .titan:
@@ -294,10 +294,8 @@ public enum WhisperModelTier: String, CaseIterable, Codable, Identifiable {
             return "2 Go+ RAM"
         case .eclair:
             return "3 Go+ RAM"
-        case .normal:
+        case .normal, .medium, .zeroFaute:
             return "4 Go+ RAM"
-        case .medium, .zeroFaute:
-            return "6 Go+ RAM"
         case .expertPlus:
             return "8 Go+ RAM"
         case .titan:
@@ -340,12 +338,13 @@ public struct HardwareDetector {
         return simulate4GB ? 4.0 : physicalMemoryGB
     }
 
-    public static func isTierUnlocked(_ tier: WhisperModelTier, simulate4GB: Bool = false) -> Bool {
+    public static func isTierUnlocked(_ tier: WhisperModelTier, simulate4GB: Bool = false, forceUnlock: Bool = false) -> Bool {
+        if forceUnlock { return true }
         return effectiveMemoryGB(simulate4GB: simulate4GB) >= tier.minimumRequiredRAMGB
     }
 
-    public static func unlockedTiers(simulate4GB: Bool = false) -> [WhisperModelTier] {
-        return WhisperModelTier.allCases.filter { isTierUnlocked($0, simulate4GB: simulate4GB) }
+    public static func unlockedTiers(simulate4GB: Bool = false, forceUnlock: Bool = false) -> [WhisperModelTier] {
+        return WhisperModelTier.allCases.filter { isTierUnlocked($0, simulate4GB: simulate4GB, forceUnlock: forceUnlock) }
     }
 
     public static var formattedMemoryGB: String {
@@ -580,6 +579,124 @@ public struct HardwareDetector {
     }
 }
 
+// MARK: - Easter Egg des 7 Messages d'Avertissement pour Forcer le Déblocage de Tous les Modèles (FR & EN)
+
+public struct EasterEggUnlockStep: Identifiable, Equatable {
+    public let id: Int
+    public let title: String
+    public let message: String
+    public let confirmButtonLabel: String
+    public let cancelButtonLabel: String
+
+    public static func steps(isFrench: Bool) -> [EasterEggUnlockStep] {
+        if isFrench {
+            return [
+                EasterEggUnlockStep(
+                    id: 1,
+                    title: "⚠️ WARNING : ÊTES-VOUS SÛR ? (1/7)",
+                    message: "Ce modèle dépasse la capacité RAM recommandée de votre appareil. Risque critique de crash système (Out-Of-Memory). Voulez-vous vraiment continuer ?",
+                    confirmButtonLabel: "Continuer quand même (1/7)",
+                    cancelButtonLabel: "Annuler"
+                ),
+                EasterEggUnlockStep(
+                    id: 2,
+                    title: "🛑 Deuxième confirmation (2/7)",
+                    message: "Vraiment sûr ? Le processeur va tourner à 100 % et la mémoire vive risque de saturer violemment si vous lancez TITAN sur une config modeste.",
+                    confirmButtonLabel: "Oui, je suis sûr (2/7)",
+                    cancelButtonLabel: "Annuler"
+                ),
+                EasterEggUnlockStep(
+                    id: 3,
+                    title: "🤨 Sérieusement ? (3/7)",
+                    message: "On a codé une sécurité exprès anti-idiots comme toi pour protéger ton téléphone, et toi tu forces le passage ?",
+                    confirmButtonLabel: "Forcer le passage (3/7)",
+                    cancelButtonLabel: "J'avoue, j'arrête"
+                ),
+                EasterEggUnlockStep(
+                    id: 4,
+                    title: "🔥 Mode Grille-Pain (4/7)",
+                    message: "Bon écoute... Si ton téléphone se transforme en grille-pain ou plante au milieu d'une phrase, viens pas pleurer dans les Issues GitHub hein.",
+                    confirmButtonLabel: "Je prends le risque (4/7)",
+                    cancelButtonLabel: "Demi-tour"
+                ),
+                EasterEggUnlockStep(
+                    id: 5,
+                    title: "😰 Panique en salle des machines (5/7)",
+                    message: "Ta barrette de RAM est littéralement en train de trembler de peur dans un coin. Il est encore temps de faire demi-tour.",
+                    confirmButtonLabel: "Même pas peur (5/7)",
+                    cancelButtonLabel: "Sauver ma RAM"
+                ),
+                EasterEggUnlockStep(
+                    id: 6,
+                    title: "🙄 Têtu jusqu'au bout (6/7)",
+                    message: "Ok t'es vraiment têtu en fait... Tu comptes cliquer sur « Continuer » jusqu'au bout quoi qu'on te dise, c'est ça ?",
+                    confirmButtonLabel: "Exactement, continue (6/7)",
+                    cancelButtonLabel: "Abandonner"
+                ),
+                EasterEggUnlockStep(
+                    id: 7,
+                    title: "🤷‍♂️ Bon bah tant pis pour toi... (7/7)",
+                    message: "Bon bah tant pis pour toi... Tous les modèles (jusqu'à Whisper TITAN 1,08 Go) sont maintenant débloqués ! Amuse-toi bien.",
+                    confirmButtonLabel: "🔓 Débloquer TOUS les modèles !",
+                    cancelButtonLabel: "Annuler"
+                )
+            ]
+        } else {
+            return [
+                EasterEggUnlockStep(
+                    id: 1,
+                    title: "⚠️ WARNING: ARE YOU SURE? (1/7)",
+                    message: "This model exceeds your device's recommended RAM capacity. Critical risk of system crash (Out-Of-Memory). Do you really want to continue?",
+                    confirmButtonLabel: "Continue anyway (1/7)",
+                    cancelButtonLabel: "Cancel"
+                ),
+                EasterEggUnlockStep(
+                    id: 2,
+                    title: "🛑 Second confirmation (2/7)",
+                    message: "Are you really sure? Your CPU will hit 100% and RAM might violently saturate if you run TITAN on a modest device.",
+                    confirmButtonLabel: "Yes, I'm sure (2/7)",
+                    cancelButtonLabel: "Cancel"
+                ),
+                EasterEggUnlockStep(
+                    id: 3,
+                    title: "🤨 Seriously? (3/7)",
+                    message: "We coded an anti-idiot safety lock specifically for people like you to protect your phone, and you're still forcing your way through?",
+                    confirmButtonLabel: "Force my way through (3/7)",
+                    cancelButtonLabel: "Fair enough, I'll stop"
+                ),
+                EasterEggUnlockStep(
+                    id: 4,
+                    title: "🔥 Toaster Mode (4/7)",
+                    message: "Look... If your phone turns into a toaster or crashes mid-sentence, don't come crying in the GitHub Issues, okay?",
+                    confirmButtonLabel: "I'll take the risk (4/7)",
+                    cancelButtonLabel: "Turn back"
+                ),
+                EasterEggUnlockStep(
+                    id: 5,
+                    title: "😰 Engine Room Panic (5/7)",
+                    message: "Your RAM chip is literally shaking in fear in a corner right now. There is still time to turn back.",
+                    confirmButtonLabel: "No fear (5/7)",
+                    cancelButtonLabel: "Save my RAM"
+                ),
+                EasterEggUnlockStep(
+                    id: 6,
+                    title: "🙄 Stubborn to the end (6/7)",
+                    message: "Okay you're really stubborn... You're just going to keep clicking \"Continue\" no matter what we say, right?",
+                    confirmButtonLabel: "Yep, keep going (6/7)",
+                    cancelButtonLabel: "Give up"
+                ),
+                EasterEggUnlockStep(
+                    id: 7,
+                    title: "🤷‍♂️ Well, too bad for you then... (7/7)",
+                    message: "Well, too bad for you then... All models (up to Whisper TITAN 1.08 GB) are now unlocked! Have fun.",
+                    confirmButtonLabel: "🔓 Unlock ALL models!",
+                    cancelButtonLabel: "Cancel"
+                )
+            ]
+        }
+    }
+}
+
 // MARK: - Payload JSON de Synchronisation Inter-Processus (IPC)
 
 public struct WhisperSharedStatePayload: Codable, Equatable {
@@ -588,6 +705,7 @@ public struct WhisperSharedStatePayload: Codable, Equatable {
     public var selectedModelRaw: String
     public var selectedLanguageRaw: String?
     public var simulateModest4GBDevice: Bool?
+    public var forceUnlockAllModels: Bool?
     public var orbStateRaw: String
     public var currentAudioLevel: Float
     public var pendingTranscribedText: String
@@ -653,8 +771,19 @@ public final class AppGroupManager: ObservableObject {
     @Published public var simulateModest4GBDevice: Bool = false {
         didSet {
             if !isApplyingRemoteUpdate && oldValue != simulateModest4GBDevice {
-                if simulateModest4GBDevice && !HardwareDetector.isTierUnlocked(selectedModel, simulate4GB: true) {
-                    selectedModel = .normal
+                if simulateModest4GBDevice && !HardwareDetector.isTierUnlocked(selectedModel, simulate4GB: true, forceUnlock: forceUnlockAllModels) {
+                    selectedModel = .zeroFaute
+                }
+                persistAndBroadcastState()
+            }
+        }
+    }
+
+    @Published public var forceUnlockAllModels: Bool = false {
+        didSet {
+            if !isApplyingRemoteUpdate && oldValue != forceUnlockAllModels {
+                if !forceUnlockAllModels && !HardwareDetector.isTierUnlocked(selectedModel, simulate4GB: simulateModest4GBDevice, forceUnlock: false) {
+                    selectedModel = .zeroFaute
                 }
                 persistAndBroadcastState()
             }
@@ -799,6 +928,7 @@ public final class AppGroupManager: ObservableObject {
             selectedModelRaw: selectedModel.rawValue,
             selectedLanguageRaw: selectedLanguage.rawValue,
             simulateModest4GBDevice: simulateModest4GBDevice,
+            forceUnlockAllModels: forceUnlockAllModels,
             orbStateRaw: orbState.rawValue,
             currentAudioLevel: currentAudioLevel,
             pendingTranscribedText: pendingTranscribedText,
@@ -920,6 +1050,9 @@ public final class AppGroupManager: ObservableObject {
             }
             if let sim4GB = validPayload.simulateModest4GBDevice, self.simulateModest4GBDevice != sim4GB {
                 self.simulateModest4GBDevice = sim4GB
+            }
+            if let forceUnlock = validPayload.forceUnlockAllModels, self.forceUnlockAllModels != forceUnlock {
+                self.forceUnlockAllModels = forceUnlock
             }
             if let state = WhisperOrbState(rawValue: validPayload.orbStateRaw), self.orbState != state {
                 self.orbState = state

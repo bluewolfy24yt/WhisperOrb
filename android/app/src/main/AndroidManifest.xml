@@ -4,6 +4,7 @@
 
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
     <!-- Compatibilité universelle Smartphones, Tablettes Android, Chromebooks, Chromebook Plus & Googlebook 14 -->
@@ -32,19 +33,18 @@
             </intent-filter>
         </activity>
 
-        <!-- Vrai Clavier Android Natif (InputMethodService) avec Orbe 3D incrusté, bouton ▾ Réduire,
-             Correcteur Automatique IA et basculement automatique en Clavier de Chiffres pur -->
+        <!-- Service d'Incrustation Gboard 3-États (Bandeau supérieur + Panneau Réglages dans Gboard + Rétractation ▾ Réduire) -->
         <service
-            android:name=".WhisperOrbInputMethodService"
+            android:name=".WhisperOrbAccessibilityService"
             android:exported="true"
-            android:label="@string/ime_service_label"
-            android:permission="android.permission.BIND_INPUT_METHOD">
+            android:label="@string/accessibility_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
-                <action android:name="android.view.InputMethod" />
+                <action android:name="android.accessibilityservice.AccessibilityService" />
             </intent-filter>
             <meta-data
-                android:name="android.view.im"
-                android:resource="@xml/method" />
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
         </service>
 
     </application>

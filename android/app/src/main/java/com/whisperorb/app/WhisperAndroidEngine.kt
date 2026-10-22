@@ -54,9 +54,16 @@ class WhisperAndroidEngine private constructor(private val context: Context) {
         get() = prefs.getBoolean("simulateModest4GBDevice", false)
         set(value) {
             prefs.edit().putBoolean("simulateModest4GBDevice", value).apply()
-            if (value && !HardwareDetector.isTierUnlocked(context, selectedModel, true)) {
-                selectedModel = WhisperModelTier.NORMAL
+            if (value && !HardwareDetector.isTierUnlocked(context, selectedModel, true, forceUnlockAllModels)) {
+                selectedModel = WhisperModelTier.ZERO_FAUTE
             }
+            notifyListeners()
+        }
+
+    var forceUnlockAllModels: Boolean
+        get() = prefs.getBoolean("forceUnlockAllModels", false)
+        set(value) {
+            prefs.edit().putBoolean("forceUnlockAllModels", value).apply()
             notifyListeners()
         }
 
@@ -179,7 +186,7 @@ class WhisperAndroidEngine private constructor(private val context: Context) {
     }
 
     fun loadModel(tier: WhisperModelTier, onReady: (() -> Unit)? = null) {
-        if (!HardwareDetector.isTierUnlocked(context, tier, simulateModest4GBDevice)) {
+        if (!HardwareDetector.isTierUnlocked(context, tier, simulateModest4GBDevice, forceUnlockAllModels)) {
             lastErrorMessage = "Le modèle ${tier.displayName} nécessite ${tier.requiredRAMBadgeText}."
             notifyListeners()
             return
@@ -248,9 +255,9 @@ class WhisperAndroidEngine private constructor(private val context: Context) {
     fun startListening() {
         val downloader = ModelDownloader.getInstance(context)
         var targetTier = selectedModel
-        if (!downloader.isModelDownloaded(targetTier) || !HardwareDetector.isTierUnlocked(context, targetTier, simulateModest4GBDevice)) {
+        if (!downloader.isModelDownloaded(targetTier) || !HardwareDetector.isTierUnlocked(context, targetTier, simulateModest4GBDevice, forceUnlockAllModels)) {
             val fallback = WhisperModelTier.entries.firstOrNull {
-                downloader.isModelDownloaded(it) && HardwareDetector.isTierUnlocked(context, it, simulateModest4GBDevice)
+                downloader.isModelDownloaded(it) && HardwareDetector.isTierUnlocked(context, it, simulateModest4GBDevice, forceUnlockAllModels)
             }
             if (fallback != null) {
                 selectedModel = fallback

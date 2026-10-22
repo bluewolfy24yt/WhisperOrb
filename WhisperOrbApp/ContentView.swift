@@ -19,6 +19,7 @@ public struct ContentView: View {
     @State private var newSpokenPhrase: String = ""
     @State private var newWrittenReplacement: String = ""
     @State private var showRawJSONPreview: Bool = false
+    @State private var easterEggStepIndex: Int? = nil
 
     private let githubRepoURLString = "https://github.com/bluewolfy24yt/WhisperOrb"
     private let githubReleasesURLString = "https://github.com/bluewolfy24yt/WhisperOrb/releases/latest"
@@ -82,6 +83,95 @@ public struct ContentView: View {
                 .padding(.horizontal, horizontalSizeClass == .regular ? 24 : 16)
                 .padding(.vertical, 16)
             }
+
+            if let stepIdx = easterEggStepIndex {
+                easterEggWarningModalOverlay(stepIndex: stepIdx)
+            }
+        }
+    }
+
+    // MARK: - Easter Egg des 7 Messages d'Avertissement (Déblocage Forcé des Modèles Lourds)
+
+    private func easterEggWarningModalOverlay(stepIndex: Int) -> some View {
+        let isFrench = (appGroup.selectedLanguage.effectiveStyleLanguageCode == "fr")
+        let allSteps = EasterEggUnlockStep.steps(isFrench: isFrench)
+        let safeIdx = max(0, min(allSteps.count - 1, stepIndex))
+        let step = allSteps[safeIdx]
+
+        return ZStack {
+            Color.black.opacity(0.75)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    easterEggStepIndex = nil
+                }
+
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Text(step.title)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(safeIdx == 6 ? Color(hex: "#30D158") : Color(hex: "#FF9F0A"))
+                    Spacer()
+                    Text("\(safeIdx + 1)/7")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Color.white.opacity(0.10)))
+                        .foregroundColor(.white)
+                }
+
+                Text(step.message)
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundColor(Color.white.opacity(0.90))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 10) {
+                    Button(action: {
+                        easterEggStepIndex = nil
+                    }) {
+                        Text(step.cancelButtonLabel)
+                            .font(.system(size: 13, weight: .semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.10)))
+                            .foregroundColor(.white)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: {
+                        let generator = UIImpactFeedbackGenerator(style: .medium)
+                        generator.impactOccurred()
+                        if safeIdx + 1 < allSteps.count {
+                            easterEggStepIndex = safeIdx + 1
+                        } else {
+                            appGroup.forceUnlockAllModels = true
+                            easterEggStepIndex = nil
+                        }
+                    }) {
+                        Text(step.confirmButtonLabel)
+                            .font(.system(size: 13, weight: .bold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(safeIdx == 6 ? Color(hex: "#30D158") : Color(hex: "#FF453A"))
+                            )
+                            .foregroundColor(.white)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(20)
+            .frame(maxWidth: 420)
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(Color(hex: "#16161C"))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .strokeBorder(Color(hex: "#FF9F0A").opacity(0.45), lineWidth: 1.5)
+                    )
+                    .shadow(color: Color.black.opacity(0.65), radius: 24, x: 0, y: 12)
+            )
+            .padding(.horizontal, 24)
         }
     }
 
@@ -369,7 +459,10 @@ public struct ContentView: View {
     // MARK: - Section 2 : Les 7 Modèles Whisper Hors-Ligne + Sécurité Matérielle RAM
 
     private var card2ModelsSection: some View {
-        let unlockedCount = HardwareDetector.unlockedTiers(simulate4GB: appGroup.simulateModest4GBDevice).count
+        let unlockedCount = HardwareDetector.unlockedTiers(
+            simulate4GB: appGroup.simulateModest4GBDevice,
+            forceUnlock: appGroup.forceUnlockAllModels
+        ).count
 
         return VStack(alignment: .leading, spacing: 14) {
             cardSectionHeader(
@@ -378,18 +471,51 @@ public struct ContentView: View {
                 subtitle: "GPU Metal + FlashAttention • \(unlockedCount)/7 modèles débloqués sur votre appareil"
             )
 
-            // Switch de test matériel (Simuler un téléphone 4 Go RAM)
+            // Switch de test matériel (Simuler un téléphone 4 Go RAM : débloque jusqu'à Whisper Expert v3 Turbo)
             Toggle(isOn: $appGroup.simulateModest4GBDevice) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("🧪 Simuler un téléphone modeste (4 Go RAM)")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(.white)
-                    Text("Permet de tester le verrouillage automatique des modèles lourds")
+                    Text("Débloque jusqu'à Whisper Expert (v3 Turbo) et verrouille Expert+ & TITAN")
                         .font(.system(size: 11))
                         .foregroundColor(Color.white.opacity(0.55))
                 }
             }
             .toggleStyle(SwitchToggleStyle(tint: Color(hex: "#FF9F0A")))
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color(hex: "#0D0D11")))
+
+            // Bouton / Switch Easter Egg : Débloquer de force TOUS les modèles quoi qu'il arrive
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(appGroup.forceUnlockAllModels ? "🔓 Tous les modèles sont débloqués de force !" : "🔒 Débloquer tous les modèles quoi qu'il arrive")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(appGroup.forceUnlockAllModels ? Color(hex: "#30D158") : .white)
+                    Text(appGroup.forceUnlockAllModels ? "Sécurité matérielle RAM désactivée par l'utilisateur" : "Outrepasser la sécurité RAM (à vos risques et périls)")
+                        .font(.system(size: 11))
+                        .foregroundColor(Color.white.opacity(0.55))
+                }
+                Spacer()
+                Button(action: {
+                    if appGroup.forceUnlockAllModels {
+                        appGroup.forceUnlockAllModels = false
+                    } else {
+                        easterEggStepIndex = 0
+                    }
+                }) {
+                    Text(appGroup.forceUnlockAllModels ? "Reverrouiller" : "Débloquer")
+                        .font(.system(size: 12, weight: .bold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(appGroup.forceUnlockAllModels ? Color.white.opacity(0.10) : Color(hex: "#FF9F0A").opacity(0.22))
+                        )
+                        .foregroundColor(appGroup.forceUnlockAllModels ? .white : Color(hex: "#FF9F0A"))
+                }
+                .buttonStyle(.plain)
+            }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color(hex: "#0D0D11")))
 
@@ -417,7 +543,11 @@ public struct ContentView: View {
     }
 
     private func modelTierCardView(for tier: WhisperModelTier) -> some View {
-        let isUnlocked = HardwareDetector.isTierUnlocked(tier, simulate4GB: appGroup.simulateModest4GBDevice)
+        let isUnlocked = HardwareDetector.isTierUnlocked(
+            tier,
+            simulate4GB: appGroup.simulateModest4GBDevice,
+            forceUnlock: appGroup.forceUnlockAllModels
+        )
         let isSelected = (appGroup.selectedModel == tier)
         let isDownloaded = modelDownloader.downloadedModels.contains(tier)
         let isDownloading = modelDownloader.activeDownloads.contains(tier)
@@ -494,9 +624,16 @@ public struct ContentView: View {
 
             HStack(spacing: 10) {
                 if !isUnlocked {
-                    Text("Verrouillé par sécurité matérielle (nécessite \(tier.requiredRAMBadgeText))")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(Color.white.opacity(0.45))
+                    Button(action: {
+                        easterEggStepIndex = 0
+                    }) {
+                        HStack(spacing: 6) {
+                            Text("🔒 Verrouillé par sécurité matérielle (\(tier.requiredRAMBadgeText)) • Forcer le déblocage ?")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(Color(hex: "#FF9F0A"))
+                        }
+                    }
+                    .buttonStyle(.plain)
                 } else if isDownloaded {
                     Button(action: {
                         appGroup.selectedModel = tier

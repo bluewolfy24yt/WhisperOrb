@@ -930,7 +930,7 @@ public struct KeyboardLayoutView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(WhisperModelTier.allCases) { tier in
-                        let isUnlocked = HardwareDetector.isTierUnlocked(tier, simulate4GB: appGroup.simulateModest4GBDevice)
+                        let isUnlocked = HardwareDetector.isTierUnlocked(tier, simulate4GB: appGroup.simulateModest4GBDevice, forceUnlock: appGroup.forceUnlockAllModels)
                         let isSelected = (appGroup.selectedModel == tier)
                         Button(action: {
                             guard isUnlocked else { return }
