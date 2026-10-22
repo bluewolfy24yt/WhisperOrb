@@ -13,7 +13,7 @@ public final class WhisperEngine: ObservableObject {
     @Published public var loadedTier: WhisperModelTier? = nil
     @Published public var isLoadingModel: Bool = false
     @Published public var liveTestTranscript: String = ""
-    @Published public var statusBannerMessage: String = "Moteur prêt • Activez le mode Tâche de Fond avant d'ouvrir Goodnotes"
+    @Published public var statusBannerMessage: String = "Moteur prêt • Activez l'écoute en arrière-plan pour dicter partout"
     @Published public var lastErrorMessage: String? = nil
     @Published public var lastTranscriptionLatencyMs: Int = 0
 
@@ -24,9 +24,10 @@ public final class WhisperEngine: ObservableObject {
     public let optimalThreadCount: Int = HardwareDetector.optimalThreadCount
     private var initialPromptCString: UnsafeMutablePointer<CChar>? = nil
     private var frenchLangCString: UnsafeMutablePointer<CChar>? = nil
+    private var cachedPromptTokens: [whisper_token] = []
 
-    // Prompt court (8 tokens) qui active le style ponctué/accentué français sans ralentir le décodeur
-    private let frenchPunctuationPrompt = "Bonjour, comment allez-vous ? Très bien, merci."
+    // Seed ultra-court (2 tokens) pré-tokenisé une seule fois en RAM au chargement (0 ms de coût de tokenisation)
+    private let frenchPunctuationPrompt = "Bonjour,"
 
     // MARK: - Pipeline Audio Temps Réel (AVAudioEngine + Ré-échantillonneur Anti-Repliement 16 kHz)
 
@@ -169,24 +170,36 @@ public final class WhisperEngine: ObservableObject {
                 ctx = whisper_init_from_file_with_params(modelPath, cparams)
             }
 
-            // Pré-chauffage ultra-rapide des shaders Metal GPU (évite la latence de 1ère dictée)
+            // Pré-tokenisation unique du seed français et pré-chauffage des shaders Metal GPU
+            var extractedTokens: [whisper_token] = []
             if let validCtx = ctx {
-                var warmupParams = self.makeWhisperFullParams(audioDurationSeconds: 0.8)
+                if let promptPtr = self.initialPromptCString {
+                    var tempTokens = [whisper_token](repeating: 0, count: 16)
+                    let count = tempTokens.withUnsafeMutableBufferPointer { buf in
+                        whisper_tokenize(validCtx, promptPtr, buf.baseAddress, Int32(buf.count))
+                    }
+                    if count > 0 {
+                        extractedTokens = Array(tempTokens.prefix(Int(count)))
+                    }
+                }
+
+                var warmupParams = self.makeWhisperFullParams(audioDurationSeconds: 0.5)
                 warmupParams.initial_prompt = nil
                 warmupParams.max_tokens = 1
-                let warmupSilence = [Float](repeating: 0.0, count: 16000)
+                let warmupSilence = [Float](repeating: 0.0, count: 8000)
                 _ = warmupSilence.withUnsafeBufferPointer { ptr in
                     whisper_full(validCtx, warmupParams, ptr.baseAddress, Int32(warmupSilence.count))
                 }
             }
 
             DispatchQueue.main.async {
+                self.cachedPromptTokens = extractedTokens
                 self.whisperContext = ctx
                 self.loadedTier = ctx != nil ? tier : nil
                 self.isLoadingModel = false
                 if ctx != nil {
-                    let accelLabel = metalActive ? "GPU Metal + FlashAttention" : "\(self.optimalThreadCount) cœurs CPU"
-                    self.statusBannerMessage = "\(tier.displayName) prêt (\(accelLabel))"
+                    let accelLabel = metalActive ? "GPU Metal + FlashAttention" : "\(self.optimalThreadCount) cœurs Performance"
+                    self.statusBannerMessage = "\(tier.displayName) actif • \(accelLabel)"
                 } else {
                     self.lastErrorMessage = "Échec de l'initialisation du modèle \(tier.displayName)."
                     self.statusBannerMessage = "Erreur de chargement du modèle"
@@ -215,16 +228,15 @@ public final class WhisperEngine: ObservableObject {
         wparams.temperature = 0.0
         wparams.temperature_inc = 0.0
         wparams.greedy.best_of = 1
+        wparams.max_tokens = 96
+        wparams.n_max_text_ctx = 32
+        wparams.initial_prompt = nil
 
-        if let promptPtr = initialPromptCString {
-            wparams.initial_prompt = UnsafePointer(promptPtr)
-        }
-
-        // Fenêtre d'encodage Metal ultra-ajustée : 1s d'audio = 50 frames Whisper (max 1500 = 30s).
-        // Réduit le coût d'encodage de 8x à 10x sur les phrases de 1 à 4 secondes (ex: 128 ou 160 frames au lieu de 1500).
-        let neededCtx = Int(ceil(audioDurationSeconds * 50.0)) + 28
+        // Fenêtre d'encodage Metal ultra-ajustée (plancher 64 frames = 1,28 s au lieu de 1500 frames = 30 s)
+        // Divise par 2 le temps d'encodage GPU par rapport au plancher 128 sur les phrases courtes/moyennes
+        let neededCtx = Int(ceil(audioDurationSeconds * 50.0)) + 12
         let alignedCtx = ((neededCtx + 31) / 32) * 32
-        wparams.audio_ctx = Int32(max(128, min(1500, alignedCtx)))
+        wparams.audio_ctx = Int32(max(64, min(1500, alignedCtx)))
 
         return wparams
     }
@@ -585,9 +597,9 @@ public final class WhisperEngine: ObservableObject {
             }
         }
 
-        // Garde 0,10 s avant le premier son et 0,18 s après le dernier son
-        let preRoll = Int(targetSampleRate * 0.10)
-        let postRoll = Int(targetSampleRate * 0.18)
+        // Garde 0,08 s avant le premier son et 0,14 s après le dernier son
+        let preRoll = Int(targetSampleRate * 0.08)
+        let postRoll = Int(targetSampleRate * 0.14)
         let startIdx = max(0, firstVoiceSample - preRoll)
         let endIdx = min(filtered.count - 1, max(startIdx, lastVoiceSample + postRoll))
 
@@ -616,16 +628,16 @@ public final class WhisperEngine: ObservableObject {
             }
         }
 
-        // 4. Marges de silence optimisées pour whisper.cpp Metal (0,10 s en tête + 0,32 s en queue, min 1,05 s au total)
-        let leadingPad = [Float](repeating: 0.0, count: Int(targetSampleRate * 0.10))
-        let trailingPad = [Float](repeating: 0.0, count: Int(targetSampleRate * 0.32))
+        // 4. Marges de silence ultra-courtes (0,05 s en tête + 0,15 s en queue, min 0,65 s au total)
+        let leadingPad = [Float](repeating: 0.0, count: Int(targetSampleRate * 0.05))
+        let trailingPad = [Float](repeating: 0.0, count: Int(targetSampleRate * 0.15))
         var finalBuffer: [Float] = []
-        finalBuffer.reserveCapacity(leadingPad.count + trimmed.count + trailingPad.count + 4000)
+        finalBuffer.reserveCapacity(leadingPad.count + trimmed.count + trailingPad.count + 2048)
         finalBuffer.append(contentsOf: leadingPad)
         finalBuffer.append(contentsOf: trimmed)
         finalBuffer.append(contentsOf: trailingPad)
 
-        let minSamplesRequired = Int(targetSampleRate * 1.05)
+        let minSamplesRequired = Int(targetSampleRate * 0.65)
         if finalBuffer.count < minSamplesRequired {
             finalBuffer.append(contentsOf: [Float](repeating: 0.0, count: minSamplesRequired - finalBuffer.count))
         }
@@ -644,11 +656,12 @@ public final class WhisperEngine: ObservableObject {
         }
 
         let audioDurationSeconds = Double(conditionedFrames.count) / targetSampleRate
-        let wparams = makeWhisperFullParams(audioDurationSeconds: audioDurationSeconds)
+        let baseParams = makeWhisperFullParams(audioDurationSeconds: audioDurationSeconds)
+        let promptTokensSnapshot = (loadedTier == .eclair) ? [] : cachedPromptTokens
 
         isTranscribingNow = true
         AppGroupManager.shared.orbState = .transcribing
-        statusBannerMessage = "Transcription GPU Metal en cours..."
+        statusBannerMessage = "Transcription GPU Metal..."
         let startTime = Date()
 
         inferenceQueue.async { [weak self] in
@@ -662,8 +675,17 @@ public final class WhisperEngine: ObservableObject {
                 return
             }
 
-            let rc = conditionedFrames.withUnsafeBufferPointer { ptr in
-                whisper_full(ctx, wparams, ptr.baseAddress, Int32(conditionedFrames.count))
+            let rc: Int32 = conditionedFrames.withUnsafeBufferPointer { audioPtr in
+                var wparams = baseParams
+                if !promptTokensSnapshot.isEmpty {
+                    return promptTokensSnapshot.withUnsafeBufferPointer { tokenPtr in
+                        wparams.prompt_tokens = tokenPtr.baseAddress
+                        wparams.prompt_n_tokens = Int32(tokenPtr.count)
+                        return whisper_full(ctx, wparams, audioPtr.baseAddress, Int32(audioPtr.count))
+                    }
+                } else {
+                    return whisper_full(ctx, wparams, audioPtr.baseAddress, Int32(audioPtr.count))
+                }
             }
 
             var rawSegments: [String] = []

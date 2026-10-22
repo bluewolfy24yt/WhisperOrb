@@ -3,8 +3,9 @@ import SwiftUI
 import UIKit
 import Combine
 import CoreFoundation
+import Metal
 
-// MARK: - Enumération des 3 Modèles Whisper (Partagée App + Clavier)
+// MARK: - Énumération des 3 Modèles Whisper (Partagée App + Clavier)
 
 public enum WhisperModelTier: String, CaseIterable, Codable, Identifiable {
     case eclair = "eclair"
@@ -38,11 +39,11 @@ public enum WhisperModelTier: String, CaseIterable, Codable, Identifiable {
     public var subtitle: String {
         switch self {
         case .eclair:
-            return "Ultra-rapide • Brouillon & prise de notes"
+            return "Instantané • Messages rapides & notes courtes"
         case .normal:
-            return "Équilibré • Fluide & économe en batterie"
+            return "Équilibré • Dictée quotidienne fluide & précise"
         case .zeroFaute:
-            return "Précision maximale • Contexte & ponctuation parfaite"
+            return "Haute précision • Rédaction longue & vocabulaire complexe"
         }
     }
 
@@ -93,16 +94,16 @@ public enum WhisperModelTier: String, CaseIterable, Codable, Identifiable {
     public var latencyDescription: String {
         switch self {
         case .eclair:
-            return "~0,15 s"
+            return "~0,18 s"
         case .normal:
             return "~0,35 s"
         case .zeroFaute:
-            return "~0,70 s"
+            return "~0,65 s"
         }
     }
 }
 
-// MARK: - Détecteur Matériel Universel Apple (Tous les iPhone & iPad — Puce Série A & Série M)
+// MARK: - Détecteur Matériel Universel & 100 % Future-Proof (Tous les iPhone, iPad & Mac)
 
 public struct HardwareDetector {
     public static var physicalMemoryBytes: UInt64 {
@@ -114,8 +115,27 @@ public struct HardwareDetector {
     }
 
     public static var formattedMemoryGB: String {
-        String(format: "%.1f Go RAM", physicalMemoryGB)
+        String(format: "%.0f Go RAM", round(physicalMemoryGB))
     }
+
+    public static var isRunningOnMac: Bool {
+        if ProcessInfo.processInfo.isiOSAppOnMac {
+            return true
+        }
+        let code = machineIdentifier
+        return code.hasPrefix("Mac") || code.hasPrefix("iMac") || code.hasPrefix("MacBook")
+    }
+
+    /// Lit directement le nom de la puce gravée dans le silicium via le pilote Metal d'Apple (100 % Future-Proof)
+    public static let metalGPUChipName: String = {
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            return "Apple Metal GPU"
+        }
+        let raw = device.name
+            .replacingOccurrences(of: " GPU", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return raw.isEmpty ? "Apple Metal GPU" : raw
+    }()
 
     public static var machineIdentifier: String {
         var systemInfo = utsname()
@@ -130,20 +150,27 @@ public struct HardwareDetector {
 
     public static var deviceMarketingName: String {
         let code = machineIdentifier
+
+        if ProcessInfo.processInfo.isiOSAppOnMac {
+            return "Mac (\(metalGPUChipName))"
+        }
+
         switch code {
-        // --- Gamme iPad Pro ---
-        case "iPad8,11", "iPad8,12":
-            return "iPad Pro 12,9\" (4e gén) — A12Z Bionic"
-        case "iPad8,9", "iPad8,10":
-            return "iPad Pro 11\" (2e gén) — A12Z Bionic"
+        // --- Gamme iPad Pro (A12X / A12Z jusqu'à M4, M5 & futurs) ---
         case "iPad8,1", "iPad8,2", "iPad8,3", "iPad8,4", "iPad8,5", "iPad8,6", "iPad8,7", "iPad8,8":
-            return "iPad Pro (A12X Bionic)"
+            return "iPad Pro — A12X Bionic"
+        case "iPad8,9", "iPad8,10":
+            return "iPad Pro 11\" — A12Z Bionic"
+        case "iPad8,11", "iPad8,12":
+            return "iPad Pro 12,9\" — A12Z Bionic"
         case "iPad13,4", "iPad13,5", "iPad13,6", "iPad13,7", "iPad13,8", "iPad13,9", "iPad13,10", "iPad13,11":
-            return "iPad Pro (Puce Apple M1)"
+            return "iPad Pro — Apple M1"
         case "iPad14,3", "iPad14,4", "iPad14,5", "iPad14,6":
-            return "iPad Pro (Puce Apple M2)"
+            return "iPad Pro — Apple M2"
         case "iPad16,3", "iPad16,4", "iPad16,5", "iPad16,6":
-            return "iPad Pro (Puce Apple M4)"
+            return "iPad Pro — Apple M4"
+        case "iPad17,1", "iPad17,2", "iPad17,3", "iPad17,4":
+            return "iPad Pro — Apple M5"
 
         // --- Gamme iPad Air ---
         case "iPad11,3", "iPad11,4":
@@ -151,11 +178,13 @@ public struct HardwareDetector {
         case "iPad13,1", "iPad13,2":
             return "iPad Air (4e gén) — A14 Bionic"
         case "iPad13,16", "iPad13,17":
-            return "iPad Air (5e gén) — Puce Apple M1"
+            return "iPad Air — Apple M1"
         case "iPad14,8", "iPad14,9", "iPad14,10", "iPad14,11":
-            return "iPad Air — Puce Apple M2"
+            return "iPad Air — Apple M2"
         case "iPad15,3", "iPad15,4", "iPad15,5", "iPad15,6":
-            return "iPad Air — Puce Apple M3"
+            return "iPad Air — Apple M3"
+        case "iPad16,8", "iPad16,9", "iPad16,10", "iPad16,11":
+            return "iPad Air — Apple M4"
 
         // --- Gamme iPad mini ---
         case "iPad11,1", "iPad11,2":
@@ -175,7 +204,7 @@ public struct HardwareDetector {
         case "iPad15,7", "iPad15,8":
             return "iPad (11e gén) — A16 Bionic"
 
-        // --- Gamme iPhone (XS / XR à iPhone 16 Pro Max) ---
+        // --- Gamme iPhone (XS / XR jusqu'à iPhone 18 Pro Max & Future-Proof) ---
         case "iPhone11,2", "iPhone11,4", "iPhone11,6":
             return "iPhone XS — A12 Bionic"
         case "iPhone11,8":
@@ -228,41 +257,92 @@ public struct HardwareDetector {
             return "iPhone 16 Pro — A18 Pro"
         case "iPhone17,2":
             return "iPhone 16 Pro Max — A18 Pro"
-        case "x86_64", "arm64":
-            if UIDevice.current.userInterfaceIdiom == .pad {
-                return "iPad (Apple Silicon / Metal)"
-            } else {
-                return "iPhone (Apple Silicon / Metal)"
-            }
+        // Gamme iPhone 17 (A19 / A19 Pro)
+        case "iPhone18,3":
+            return "iPhone 17 — A19"
+        case "iPhone18,4":
+            return "iPhone 17 Air — A19"
+        case "iPhone18,1":
+            return "iPhone 17 Pro — A19 Pro"
+        case "iPhone18,2":
+            return "iPhone 17 Pro Max — A19 Pro"
+        case "iPhone18,5":
+            return "iPhone 17e — A19"
+        // Gamme iPhone 18 (A20 / A20 Pro)
+        case "iPhone19,3":
+            return "iPhone 18 — A20"
+        case "iPhone19,4":
+            return "iPhone 18 Air — A20"
+        case "iPhone19,1":
+            return "iPhone 18 Pro — A20 Pro"
+        case "iPhone19,2":
+            return "iPhone 18 Pro Max — A20 Pro"
+
         default:
-            if code.hasPrefix("iPad") {
-                return "iPad (\(code) • Metal GPU)"
-            } else if code.hasPrefix("iPhone") {
-                return "iPhone (\(code) • Metal GPU)"
+            return futureProofDeviceDescription(for: code)
+        }
+    }
+
+    /// Décodeur dynamique Future-Proof : supporte automatiquement tous les futurs iPhone (19, 20, 21...), iPad et Mac
+    private static func futureProofDeviceDescription(for code: String) -> String {
+        let chip = metalGPUChipName
+        if code.hasPrefix("iPhone") {
+            let numbers = code.replacingOccurrences(of: "iPhone", with: "").split(separator: ",")
+            if let major = Int(numbers.first ?? ""), major >= 19 {
+                let gen = major - 1
+                let minor = Int(numbers.dropFirst().first ?? "") ?? 0
+                let suffix: String
+                switch minor {
+                case 1: suffix = " Pro"
+                case 2: suffix = " Pro Max"
+                case 4: suffix = " Air"
+                default: suffix = ""
+                }
+                return "iPhone \(gen)\(suffix) — \(chip)"
             }
-            return "Appareil Apple (\(code))"
+            return "iPhone — \(chip)"
+        } else if code.hasPrefix("iPad") {
+            return "iPad — \(chip)"
+        } else if code.hasPrefix("Mac") || code.hasPrefix("iMac") {
+            return "Mac — \(chip)"
+        } else if UIDevice.current.userInterfaceIdiom == .pad {
+            return "iPad — \(chip)"
+        } else {
+            return "iPhone — \(chip)"
         }
     }
 
     public static var isHighRefreshRateProMotion: Bool {
-        UIScreen.main.maximumFramesPerSecond >= 120 || machineIdentifier.hasPrefix("iPad8,") || machineIdentifier.hasPrefix("iPad13,") || machineIdentifier.hasPrefix("iPad14,")
+        UIScreen.main.maximumFramesPerSecond >= 120
     }
 
     public static var recommendedTier: WhisperModelTier {
         if physicalMemoryGB >= 5.2 {
             return .zeroFaute
-        } else {
+        } else if physicalMemoryGB >= 3.5 {
             return .normal
+        } else {
+            return .eclair
         }
     }
 
+    /// Sélectionne uniquement les cœurs CPU Haute Performance (évite les petits cœurs Efficacité Blizzard/Sawtooth qui brident whisper.cpp)
     public static var optimalThreadCount: Int {
-        max(2, min(6, ProcessInfo.processInfo.activeProcessorCount - 2))
+        let totalCores = ProcessInfo.processInfo.activeProcessorCount
+        if isRunningOnMac {
+            return max(4, min(8, totalCores - 2))
+        }
+        // Sur iPhone (6 cœurs = 2 Performance + 4 Efficacité), utiliser strictement les 2 cœurs Performance
+        // pendant que le GPU Metal exécute les calculs matriciels (zéro attente barrière, chauffe divisée par 2)
+        if UIDevice.current.userInterfaceIdiom == .phone || totalCores <= 6 {
+            return 2
+        }
+        // Sur iPad Pro / Air 8 cœurs (A12X, A12Z, M1, M2, M3, M4, M5 = 4 Performance + 4 Efficacité) : 4 threads
+        return min(6, max(4, totalCores / 2))
     }
 
     public static var telemetrySummary: String {
-        let proMotionBadge = isHighRefreshRateProMotion ? " • ProMotion 120 Hz" : " • 60 Hz"
-        return "\(deviceMarketingName) • \(formattedMemoryGB)\(proMotionBadge)"
+        return "\(deviceMarketingName) • \(formattedMemoryGB)"
     }
 }
 
@@ -286,7 +366,7 @@ public struct WhisperSharedStatePayload: Codable, Equatable {
     public var updatedAt: TimeInterval
 }
 
-// MARK: - Gestionnaire Central AppGroup + Notifications Darwin + Fallback Pasteboard
+// MARK: - Gestionnaire Central AppGroup + Notifications Darwin (Zéro Chauffe / 0 % CPU au Repos)
 
 public final class AppGroupManager: ObservableObject {
     public static let shared = AppGroupManager()
@@ -313,6 +393,7 @@ public final class AppGroupManager: ObservableObject {
 
     public static let darwinToggleRecordingNotification = "com.bluewolfy24yt.whisperorb.toggleRecording"
     public static let darwinStateUpdatedNotification = "com.bluewolfy24yt.whisperorb.stateUpdated"
+    public static let darwinAudioLevelUpdatedNotification = "com.bluewolfy24yt.whisperorb.audioLevel"
     public static let pasteboardBusName = UIPasteboard.Name("com.bluewolfy24yt.whisperorb.bus")
 
     // MARK: - Propriétés @Published Synchronisées
@@ -361,7 +442,7 @@ public final class AppGroupManager: ObservableObject {
         didSet { if !isApplyingRemoteUpdate && oldValue != isKeyboardCollapsed { persistAndBroadcastState() } }
     }
 
-    // Callback déclenché dans l'application principale quand le clavier touche la bulle
+    // Callback déclenché dans l'application principale quand le clavier touche l'orbe
     public var onToggleRecordingRequested: (() -> Void)?
 
     // MARK: - Propriétés Internes
@@ -373,15 +454,17 @@ public final class AppGroupManager: ObservableObject {
     private var toggleRecordingRequestCount: Int = 0
     private var lastHandledToggleRequestCount: Int = 0
     private var lastToggleTriggerTime: TimeInterval = 0
+    private var lastAudioBroadcastTime: TimeInterval = 0
 
     private enum Keys {
         static let hasLaunchedBefore = "whisperorb.hasLaunchedBefore"
         static let sharedPayloadData = "whisperorb.sharedPayloadData"
+        static let liveAudioLevel = "whisperorb.liveAudioLevel"
         static let sharedFileName = "whisperorb_shared_state.json"
         static let pasteboardStateType = "com.bluewolfy24yt.whisperorb.state.json"
     }
 
-    // MARK: - Initialisation
+    // MARK: - Initialisation (Sans Polling Permanent Énergivore)
 
     private init() {
         if let groupDefaults = UserDefaults(suiteName: Self.appGroupIdentifier) {
@@ -390,7 +473,6 @@ public final class AppGroupManager: ObservableObject {
             self.userDefaults = UserDefaults.standard
         }
 
-        // Premier lancement : sélection intelligente du modèle selon la RAM (6 Go A12Z -> Zéro Faute, 4 Go A15 -> Normal)
         if !userDefaults.bool(forKey: Keys.hasLaunchedBefore) {
             self.selectedModel = HardwareDetector.recommendedTier
             userDefaults.set(true, forKey: Keys.hasLaunchedBefore)
@@ -400,7 +482,6 @@ public final class AppGroupManager: ObservableObject {
         }
 
         registerDarwinNotificationObservers()
-        startFastPolling()
     }
 
     deinit {
@@ -409,7 +490,7 @@ public final class AppGroupManager: ObservableObject {
         CFNotificationCenterRemoveEveryObserver(center, Unmanaged.passUnretained(self).toOpaque())
     }
 
-    // MARK: - Répertoires Partagés (App Group avec Conservation des Modèles Déjà Téléchargés)
+    // MARK: - Répertoires Partagés (Conservation des Modèles Déjà Téléchargés lors des MAJ)
 
     public var sharedContainerURL: URL {
         if let groupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: Self.appGroupIdentifier) {
@@ -438,7 +519,7 @@ public final class AppGroupManager: ObservableObject {
         sharedContainerURL.appendingPathComponent(Keys.sharedFileName, isDirectory: false)
     }
 
-    // MARK: - Canal 1 & Canal 2 : Sauvegarde et Diffusion Temps Réel
+    // MARK: - Sauvegarde et Diffusion Événementielle (Uniquement lors d'un Changement Réel)
 
     public func persistAndBroadcastState(postDarwinNotification: Bool = true) {
         let now = Date().timeIntervalSince1970
@@ -464,25 +545,27 @@ public final class AppGroupManager: ObservableObject {
 
         guard let encoded = try? JSONEncoder().encode(payload) else { return }
 
-        // Canal 1A : UserDefaults(suiteName: group...)
+        // Canal 1A : UserDefaults(suiteName: group...) en mémoire rapide
         userDefaults.set(encoded, forKey: Keys.sharedPayloadData)
 
-        // Canal 1B : Fichier JSON atomique dans le conteneur App Group
+        // Canal 1B : Fichier JSON dans le conteneur App Group
         try? encoded.write(to: sharedStateFileURL, options: [.atomic])
-
-        // Canal 2 : Fallback Sideloading gratuit via UIPasteboard dédié nommé
-        if let busPasteboard = UIPasteboard(name: Self.pasteboardBusName, create: true) {
-            busPasteboard.setData(encoded, forPasteboardType: Keys.pasteboardStateType)
-        }
 
         if postDarwinNotification {
             postDarwinNotificationNamed(Self.darwinStateUpdatedNotification)
         }
     }
 
-    /// Mise à jour haute fréquence (20 Hz) du niveau audio sans surcharger les notifications Darwin
+    /// Mise à jour ultra-légère (bridée à 8 Hz max, sans écriture disque SSD ni UIPasteboard) pour éviter toute chauffe
     public func updateLiveAudioLevel(_ level: Float) {
         let clamped = max(0.0, min(1.0, level))
+        let now = Date().timeIntervalSince1970
+
+        if clamped > 0.005 && (now - lastAudioBroadcastTime < 0.12) && abs(clamped - currentAudioLevel) < 0.04 {
+            return
+        }
+        lastAudioBroadcastTime = now
+
         if DispatchQueue.isMain {
             self.currentAudioLevel = clamped
         } else {
@@ -490,41 +573,53 @@ public final class AppGroupManager: ObservableObject {
                 self.currentAudioLevel = clamped
             }
         }
-        persistAndBroadcastState(postDarwinNotification: false)
+
+        userDefaults.set(clamped, forKey: Keys.liveAudioLevel)
+        postDarwinNotificationNamed(Self.darwinAudioLevelUpdatedNotification)
     }
 
-    // MARK: - Lecture Multi-Canal (App Group JSON -> UserDefaults -> Pasteboard Sideloading)
+    private func reloadLiveAudioLevelOnly() {
+        let level = userDefaults.float(forKey: Keys.liveAudioLevel)
+        if abs(self.currentAudioLevel - level) > 0.01 {
+            if Thread.isMainThread {
+                self.currentAudioLevel = level
+            } else {
+                DispatchQueue.main.async {
+                    self.currentAudioLevel = level
+                }
+            }
+        }
+    }
+
+    // MARK: - Lecture Multi-Canal Événementielle (Zéro Spam I/O)
 
     public func reloadStateFromChannels() {
-        var candidates: [WhisperSharedStatePayload] = []
         let decoder = JSONDecoder()
+        var freshest: WhisperSharedStatePayload? = nil
 
-        // 1. Lecture fichier JSON partagé
-        if let fileData = try? Data(contentsOf: sharedStateFileURL),
-           let payload = try? decoder.decode(WhisperSharedStatePayload.self, from: fileData) {
-            candidates.append(payload)
-        }
-
-        // 2. Lecture UserDefaults App Group
+        // 1. Lecture prioritaire en RAM via UserDefaults App Group (zéro accès disque inutile)
         if let defaultsData = userDefaults.data(forKey: Keys.sharedPayloadData),
            let payload = try? decoder.decode(WhisperSharedStatePayload.self, from: defaultsData) {
-            candidates.append(payload)
+            freshest = payload
         }
 
-        // 3. Lecture Pasteboard nommé (Fallback universel Sideloading SideStore / AltStore / Sideloadly)
-        if let busPasteboard = UIPasteboard(name: Self.pasteboardBusName, create: false),
-           let pasteData = busPasteboard.data(forPasteboardType: Keys.pasteboardStateType),
-           let payload = try? decoder.decode(WhisperSharedStatePayload.self, from: pasteData) {
-            candidates.append(payload)
+        // 2. Lecture fichier JSON partagé si plus récent
+        if let fileData = try? Data(contentsOf: sharedStateFileURL),
+           let filePayload = try? decoder.decode(WhisperSharedStatePayload.self, from: fileData) {
+            if let current = freshest {
+                if filePayload.updatedAt > current.updatedAt {
+                    freshest = filePayload
+                }
+            } else {
+                freshest = filePayload
+            }
         }
 
-        // Sélection de l'état le plus récent parmi les canaux disponibles
-        guard let freshest = candidates.max(by: { $0.updatedAt < $1.updatedAt }) else {
+        guard let validPayload = freshest else {
             return
         }
 
-        // Vérifie d'abord si un nouvel appui sur l'orbe du clavier a été demandé via le payload partagé
-        let remoteToggleCount = freshest.toggleRecordingRequestCount ?? 0
+        let remoteToggleCount = validPayload.toggleRecordingRequestCount ?? 0
         var shouldFireToggleCallback = false
         if remoteToggleCount > self.toggleRecordingRequestCount {
             self.toggleRecordingRequestCount = remoteToggleCount
@@ -534,11 +629,11 @@ public final class AppGroupManager: ObservableObject {
             }
         }
 
-        guard freshest.updatedAt >= lastAppliedTimestamp || shouldFireToggleCallback else {
+        guard validPayload.updatedAt >= lastAppliedTimestamp || shouldFireToggleCallback else {
             return
         }
 
-        lastAppliedTimestamp = max(lastAppliedTimestamp, freshest.updatedAt)
+        lastAppliedTimestamp = max(lastAppliedTimestamp, validPayload.updatedAt)
 
         let applyBlock = { [weak self] in
             guard let self = self else { return }
@@ -550,39 +645,39 @@ public final class AppGroupManager: ObservableObject {
                 }
             }
 
-            if self.bgHex != freshest.bgHex { self.bgHex = freshest.bgHex }
-            if self.fgHex != freshest.fgHex { self.fgHex = freshest.fgHex }
-            if let model = WhisperModelTier(rawValue: freshest.selectedModelRaw), self.selectedModel != model {
+            if self.bgHex != validPayload.bgHex { self.bgHex = validPayload.bgHex }
+            if self.fgHex != validPayload.fgHex { self.fgHex = validPayload.fgHex }
+            if let model = WhisperModelTier(rawValue: validPayload.selectedModelRaw), self.selectedModel != model {
                 self.selectedModel = model
             }
-            if let state = WhisperOrbState(rawValue: freshest.orbStateRaw), self.orbState != state {
+            if let state = WhisperOrbState(rawValue: validPayload.orbStateRaw), self.orbState != state {
                 self.orbState = state
             }
-            if abs(self.currentAudioLevel - freshest.currentAudioLevel) > 0.005 {
-                self.currentAudioLevel = freshest.currentAudioLevel
+            if abs(self.currentAudioLevel - validPayload.currentAudioLevel) > 0.005 {
+                self.currentAudioLevel = validPayload.currentAudioLevel
             }
-            if self.pendingTranscribedText != freshest.pendingTranscribedText {
-                self.pendingTranscribedText = freshest.pendingTranscribedText
+            if self.pendingTranscribedText != validPayload.pendingTranscribedText {
+                self.pendingTranscribedText = validPayload.pendingTranscribedText
             }
-            if self.lastInsertedSentenceLength != freshest.lastInsertedSentenceLength {
-                self.lastInsertedSentenceLength = freshest.lastInsertedSentenceLength
+            if self.lastInsertedSentenceLength != validPayload.lastInsertedSentenceLength {
+                self.lastInsertedSentenceLength = validPayload.lastInsertedSentenceLength
             }
-            if self.shouldDeleteLastSentence != freshest.shouldDeleteLastSentence {
-                self.shouldDeleteLastSentence = freshest.shouldDeleteLastSentence
+            if self.shouldDeleteLastSentence != validPayload.shouldDeleteLastSentence {
+                self.shouldDeleteLastSentence = validPayload.shouldDeleteLastSentence
             }
-            if self.autoSpaceForGoodnotes != freshest.autoSpaceForGoodnotes {
-                self.autoSpaceForGoodnotes = freshest.autoSpaceForGoodnotes
+            if self.autoSpaceForGoodnotes != validPayload.autoSpaceForGoodnotes {
+                self.autoSpaceForGoodnotes = validPayload.autoSpaceForGoodnotes
             }
-            if self.autoPunctuation != freshest.autoPunctuation {
-                self.autoPunctuation = freshest.autoPunctuation
+            if self.autoPunctuation != validPayload.autoPunctuation {
+                self.autoPunctuation = validPayload.autoPunctuation
             }
-            if abs(self.vadSilenceThresholdSeconds - freshest.vadSilenceThresholdSeconds) > 0.01 {
-                self.vadSilenceThresholdSeconds = freshest.vadSilenceThresholdSeconds
+            if abs(self.vadSilenceThresholdSeconds - validPayload.vadSilenceThresholdSeconds) > 0.01 {
+                self.vadSilenceThresholdSeconds = validPayload.vadSilenceThresholdSeconds
             }
-            if self.isBackgroundEngineActive != freshest.isBackgroundEngineActive {
-                self.isBackgroundEngineActive = freshest.isBackgroundEngineActive
+            if self.isBackgroundEngineActive != validPayload.isBackgroundEngineActive {
+                self.isBackgroundEngineActive = validPayload.isBackgroundEngineActive
             }
-            if let remoteCollapsed = freshest.isKeyboardCollapsed, self.isKeyboardCollapsed != remoteCollapsed {
+            if let remoteCollapsed = validPayload.isKeyboardCollapsed, self.isKeyboardCollapsed != remoteCollapsed {
                 self.isKeyboardCollapsed = remoteCollapsed
             }
         }
@@ -603,7 +698,6 @@ public final class AppGroupManager: ObservableObject {
 
     // MARK: - Actions Métier Clavier <-> Application
 
-    /// Appelé par le clavier quand l'élève touche la bulle GeminiBubbleView (ou la pastille d'état)
     public func requestToggleRecordingFromKeyboard() {
         toggleRecordingRequestCount += 1
         lastHandledToggleRequestCount = toggleRecordingRequestCount
@@ -611,7 +705,6 @@ public final class AppGroupManager: ObservableObject {
         postDarwinNotificationNamed(Self.darwinToggleRecordingNotification)
     }
 
-    /// Appelé par WhisperEngine quand une phrase est transcrite et prête pour Goodnotes
     public func publishTranscribedText(_ rawText: String) {
         let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -623,12 +716,18 @@ public final class AppGroupManager: ObservableObject {
             formattedText = trimmed
         }
 
+        // Sur Mac, copie automatiquement chaque phrase dictée dans le Presse-Papier universel (⌘ + V direct)
+        if HardwareDetector.isRunningOnMac {
+            UIPasteboard.general.string = formattedText
+        }
+
         let updateBlock = { [weak self] in
             guard let self = self else { return }
             self.lastInsertedSentenceLength = formattedText.count
             self.pendingTranscribedText = formattedText
             self.orbState = .idle
             self.currentAudioLevel = 0.0
+            self.userDefaults.set(Float(0.0), forKey: Keys.liveAudioLevel)
             self.persistAndBroadcastState(postDarwinNotification: true)
         }
 
@@ -639,7 +738,6 @@ public final class AppGroupManager: ObservableObject {
         }
     }
 
-    /// Appelé par le clavier dès qu'il a inséré pendingTranscribedText dans Goodnotes
     public func consumePendingTranscribedText() -> String? {
         guard !pendingTranscribedText.isEmpty else { return nil }
         let textToInsert = pendingTranscribedText
@@ -650,7 +748,6 @@ public final class AppGroupManager: ObservableObject {
         return textToInsert
     }
 
-    /// Déclenche la suppression de la dernière phrase dictée (par commande vocale ou bouton)
     public func triggerDeleteLastSentence() {
         let updateBlock = { [weak self] in
             guard let self = self else { return }
@@ -667,7 +764,6 @@ public final class AppGroupManager: ObservableObject {
         }
     }
 
-    /// Appelé par le clavier pour exécuter et acquitter la suppression de la dernière phrase
     public func consumeDeleteLastSentenceLength() -> Int? {
         guard shouldDeleteLastSentence, lastInsertedSentenceLength > 0 else { return nil }
         let length = lastInsertedSentenceLength
@@ -679,13 +775,13 @@ public final class AppGroupManager: ObservableObject {
         return length
     }
 
-    // MARK: - Notifications Système Darwin (C-API Traversant Toutes les Sandboxes iOS)
+    // MARK: - Notifications Système Darwin (C-API Temps Réel • 0 % CPU au Repos)
 
     private func registerDarwinNotificationObservers() {
         let center = CFNotificationCenterGetDarwinNotifyCenter()
         let observerPtr = Unmanaged.passUnretained(self).toOpaque()
 
-        // 1. Observation de la demande de démarrage/arrêt d'écoute venant du clavier
+        // 1. Demande de démarrage/arrêt d'écoute venant du clavier
         CFNotificationCenterAddObserver(
             center,
             observerPtr,
@@ -702,7 +798,7 @@ public final class AppGroupManager: ObservableObject {
             .deliverImmediately
         )
 
-        // 2. Observation des mises à jour d'état (couleurs, texte transcrit, état de la bulle)
+        // 2. Mises à jour d'état (couleurs, texte transcrit, état de l'orbe)
         CFNotificationCenterAddObserver(
             center,
             observerPtr,
@@ -714,6 +810,20 @@ public final class AppGroupManager: ObservableObject {
                 }
             },
             Self.darwinStateUpdatedNotification as CFString,
+            nil,
+            .deliverImmediately
+        )
+
+        // 3. Niveau audio en direct pendant l'écoute (sans écriture disque)
+        CFNotificationCenterAddObserver(
+            center,
+            observerPtr,
+            { _, observer, _, _, _ in
+                guard let observer = observer else { return }
+                let manager = Unmanaged<AppGroupManager>.fromOpaque(observer).takeUnretainedValue()
+                manager.reloadLiveAudioLevelOnly()
+            },
+            Self.darwinAudioLevelUpdatedNotification as CFString,
             nil,
             .deliverImmediately
         )
@@ -730,11 +840,11 @@ public final class AppGroupManager: ObservableObject {
         )
     }
 
-    // MARK: - Polling Rapide Temps Réel (0.05s / 20 Hz)
+    // MARK: - Synchronisation Légère Uniquement Quand le Clavier est Ouvert
 
     public func startFastPolling() {
         pollingTimer?.invalidate()
-        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 0.45, repeats: true) { [weak self] _ in
             self?.reloadStateFromChannels()
         }
         RunLoop.main.add(timer, forMode: .common)

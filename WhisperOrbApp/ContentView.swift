@@ -40,176 +40,108 @@ public struct ContentView: View {
 
     public var body: some View {
         ZStack {
-            // Fond sombre profond style iPadOS Pro
-            LinearGradient(
-                colors: [
-                    Color(hex: "#07070B"),
-                    Color(hex: "#0D0E15"),
-                    Color(hex: "#08080C")
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            // Fond noir sobre style Apple Pro
+            Color(hex: "#09090B")
+                .ignoresSafeArea()
 
             ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 22) {
-                    // En-tête + Bandeau Mode Examen + Télémétrie Matérielle
-                    examHeaderAndTelemetrySection
+                VStack(spacing: 18) {
+                    // En-tête sobre et épuré (sans bandeau réseau/DST)
+                    soberAppHeaderSection
 
-                    // Disposition adaptative : Grille large sur iPad Pro 12,9" / Empilement sur iPhone 13
+                    // Disposition adaptative : 2 colonnes sur iPad & Mac / 1 colonne sur iPhone
                     if horizontalSizeClass == .regular {
-                        HStack(alignment: .top, spacing: 20) {
-                            VStack(spacing: 20) {
-                                card1LiveStudioAndBackgroundEngine
-                                card4GoodnotesOptimizationsAndVoiceCommands
-                                card5GitHubQRCodeAndSetupGuide
+                        HStack(alignment: .top, spacing: 18) {
+                            VStack(spacing: 18) {
+                                card1VoiceStudioSection
+                                card4PreferencesAndVoiceCommands
+                                card5GitHubAndSetupSection
                             }
                             .frame(maxWidth: .infinity)
 
-                            VStack(spacing: 20) {
-                                card2WhisperModelsSelector
-                                card3ColorCustomizationStudio
+                            VStack(spacing: 18) {
+                                card2ModelsSection
+                                card3AppearanceStudioSection
                             }
                             .frame(maxWidth: .infinity)
                         }
                     } else {
-                        VStack(spacing: 20) {
-                            card1LiveStudioAndBackgroundEngine
-                            card2WhisperModelsSelector
-                            card3ColorCustomizationStudio
-                            card4GoodnotesOptimizationsAndVoiceCommands
-                            card5GitHubQRCodeAndSetupGuide
+                        VStack(spacing: 18) {
+                            card1VoiceStudioSection
+                            card2ModelsSection
+                            card3AppearanceStudioSection
+                            card4PreferencesAndVoiceCommands
+                            card5GitHubAndSetupSection
                         }
                     }
                 }
-                .padding(.horizontal, horizontalSizeClass == .regular ? 28 : 16)
-                .padding(.vertical, 20)
+                .padding(.horizontal, horizontalSizeClass == .regular ? 24 : 16)
+                .padding(.vertical, 16)
             }
         }
     }
 
-    // MARK: - En-tête : Bandeau Anti-Suspicion "Mode Examen Hors-Ligne" & Télémétrie A12Z / A15
+    // MARK: - En-tête Sobre & Grand Public (iPhone, iPad & Mac)
 
-    private var examHeaderAndTelemetrySection: some View {
-        VStack(spacing: 14) {
-            // Bandeau Dynamique Mode Examen Hors-Ligne
-            HStack(spacing: 12) {
-                Image(systemName: networkMonitor.isConnected ? "wifi.exclamationmark" : "lock.shield.fill")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundColor(networkMonitor.isConnected ? Color(hex: "#FFCC00") : Color(hex: "#34C759"))
+    private var soberAppHeaderSection: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text("WhisperOrb")
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundColor(.white)
 
-                Text(networkMonitor.bannerText)
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                    .multilineTextAlignment(.leading)
-
-                Spacer()
-
-                Text(networkMonitor.isConnected ? networkMonitor.connectionType.uppercased() : "100 % LOCAL")
-                    .font(.system(size: 11, weight: .heavy, design: .monospaced))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(
-                        Capsule()
-                            .fill(networkMonitor.isConnected ? Color(hex: "#FF9500").opacity(0.28) : Color(hex: "#34C759").opacity(0.28))
-                    )
-                    .foregroundColor(networkMonitor.isConnected ? Color(hex: "#FFCC00") : Color(hex: "#34C759"))
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 13)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(
-                        networkMonitor.isConnected
-                        ? Color(hex: "#1E293B").opacity(0.92)
-                        : Color(hex: "#062E1E").opacity(0.92)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .strokeBorder(
-                                networkMonitor.isConnected
-                                ? Color(hex: "#38BDF8").opacity(0.45)
-                                : Color(hex: "#34C759").opacity(0.65),
-                                lineWidth: 1.4
-                            )
-                    )
-            )
-
-            // Barre de Titre & Télémétrie Matérielle
-            HStack(alignment: .center, spacing: 14) {
-                GeminiBubbleView(
-                    bgHex: appGroup.bgHex,
-                    fgHex: appGroup.fgHex,
-                    audioLevel: CGFloat(appGroup.currentAudioLevel),
-                    state: appGroup.orbState,
-                    size: 46,
-                    showSideTab: false
-                )
-
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
-                        Text("WhisperOrb")
-                            .font(.system(size: 26, weight: .heavy, design: .rounded))
-                            .foregroundColor(.white)
-
-                        Text("PRO DST")
-                            .font(.system(size: 11, weight: .black, design: .monospaced))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(Capsule().fill(Color(hex: "#0088FF").opacity(0.25)))
-                            .foregroundColor(Color(hex: "#32ADE6"))
-                    }
-
-                    Text(HardwareDetector.telemetrySummary)
-                        .font(.system(size: 13, weight: .medium, design: .monospaced))
-                        .foregroundColor(Color.white.opacity(0.72))
+                    Text("ON-DEVICE AI")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Color.white.opacity(0.08)))
+                        .foregroundColor(Color.white.opacity(0.70))
                 }
 
-                Spacer()
-
-                VStack(alignment: .trailing, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(whisperEngine.isBackgroundEngineRunning ? Color(hex: "#34C759") : Color(hex: "#FF9500"))
-                            .frame(width: 8, height: 8)
-                        Text(whisperEngine.isBackgroundEngineRunning ? "Moteur Tâche de Fond Actif" : "Moteur en Veille")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.white)
-                    }
-
-                    Text("Modèle actif : \(appGroup.selectedModel.shortBadgeName) (\(appGroup.selectedModel.ramUsageMB) Mo RAM)")
-                        .font(.system(size: 11, weight: .regular))
-                        .foregroundColor(Color.white.opacity(0.60))
-                }
+                Text(HardwareDetector.telemetrySummary)
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundColor(Color.white.opacity(0.55))
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 14)
-            .background(cardBackgroundSurface)
+
+            Spacer()
+
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(whisperEngine.isBackgroundEngineRunning ? Color(hex: "#30D158") : Color(hex: "#FF9F0A"))
+                    .frame(width: 7, height: 7)
+                Text(whisperEngine.isBackgroundEngineRunning ? "Actif" : "En veille")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(Color.white.opacity(0.85))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(Color.white.opacity(0.06)))
         }
+        .padding(.horizontal, 4)
+        .padding(.top, 4)
     }
 
-    // MARK: - CARTE 1 : Studio de Test en Direct & Activation du Moteur Tâche de Fond
+    // MARK: - Section 1 : Studio Vocal & Écoute en Arrière-Plan
 
-    private var card1LiveStudioAndBackgroundEngine: some View {
-        VStack(alignment: .leading, spacing: 18) {
+    private var card1VoiceStudioSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
             cardSectionHeader(
-                icon: "waveform.circle.fill",
-                iconColor: Color(hex: "#0088FF"),
-                title: "1. Studio Temps Réel & Moteur Goodnotes",
-                subtitle: "Testez votre bulle Gemini Live 120 Hz et activez l'écoute en tâche de fond"
+                icon: "waveform",
+                title: "Studio Vocal",
+                subtitle: "Touchez l'orbe pour dicter ou activez le moteur en arrière-plan pour le clavier"
             )
 
-            // Scène centrale de la grande bulle GeminiBubbleView (size: 130)
-            VStack(spacing: 14) {
+            // Scène centrale de l'Orbe 3D
+            VStack(spacing: 12) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .fill(Color(hex: "#0A0B10"))
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(Color(hex: "#0D0D11"))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                .strokeBorder(Color.white.opacity(0.07), lineWidth: 1)
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
                         )
-                        .frame(height: 205)
+                        .frame(height: 190)
 
                     VStack(spacing: 12) {
                         GeminiBubbleView(
@@ -217,7 +149,7 @@ public struct ContentView: View {
                             fgHex: appGroup.fgHex,
                             audioLevel: CGFloat(appGroup.currentAudioLevel),
                             state: appGroup.orbState,
-                            size: 130,
+                            size: 118,
                             showSideTab: false,
                             onTap: {
                                 let generator = UIImpactFeedbackGenerator(style: .medium)
@@ -226,33 +158,29 @@ public struct ContentView: View {
                             }
                         )
 
-                        HStack(spacing: 8) {
+                        HStack(spacing: 6) {
                             Circle()
                                 .fill(statusColorForOrbState(appGroup.orbState))
-                                .frame(width: 8, height: 8)
-                            Text("\(appGroup.orbState.statusTitle) — Touchez l'orbe pour parler / arrêter")
-                                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                                .foregroundColor(Color.white.opacity(0.82))
+                                .frame(width: 7, height: 7)
+                            Text("\(appGroup.orbState.statusTitle) — Touchez l'orbe pour parler")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(Color.white.opacity(0.72))
                         }
                     }
                 }
 
-                // Option Mode Clavier Réduit + Badges de mode optique
+                // Mode Clavier Réduit + Badge Optique
                 HStack {
                     Toggle(isOn: $appGroup.isKeyboardCollapsed) {
-                        Text("Mode Clavier Réduit (Barre vocale flottante 62 pt)")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(Color.white.opacity(0.82))
+                        Text("Mode clavier réduit (Barre vocale seule)")
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundColor(Color.white.opacity(0.85))
                     }
                     .toggleStyle(SwitchToggleStyle(tint: Color(hex: "#0A84FF")))
-
-                    Spacer()
-
-                    opticalModeBadge
                 }
             }
 
-            // Bouton Principal : Activer le Moteur Audio en Tâche de Fond (Pour Goodnotes)
+            // Bouton d'activation du moteur en arrière-plan
             Button(action: {
                 let generator = UIImpactFeedbackGenerator(style: .medium)
                 generator.impactOccurred()
@@ -263,30 +191,37 @@ public struct ContentView: View {
                 }
             }) {
                 HStack(spacing: 12) {
-                    Image(systemName: whisperEngine.isBackgroundEngineRunning ? "checkmark.shield.fill" : "waveform.badge.mic")
-                        .font(.system(size: 18, weight: .bold))
+                    Image(systemName: whisperEngine.isBackgroundEngineRunning ? "mic.fill" : "mic.slash")
+                        .font(.system(size: 16, weight: .semibold))
                     VStack(alignment: .leading, spacing: 2) {
                         Text(
                             whisperEngine.isBackgroundEngineRunning
-                            ? "Moteur Audio en Tâche de Fond ACTIF (Réponse 0,01 s dans Goodnotes)"
-                            : "Activer le Moteur Audio en Tâche de Fond (Pour Goodnotes)"
+                            ? "Moteur vocal actif en arrière-plan"
+                            : "Activer le moteur vocal en arrière-plan"
                         )
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .font(.system(size: 14, weight: .semibold))
                         Text(whisperEngine.statusBannerMessage)
-                            .font(.system(size: 11, weight: .medium))
-                            .opacity(0.88)
+                            .font(.system(size: 11, weight: .regular))
+                            .opacity(0.80)
                     }
                     Spacer()
                 }
                 .foregroundColor(.white)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 14)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
                 .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(
                             whisperEngine.isBackgroundEngineRunning
-                            ? LinearGradient(colors: [Color(hex: "#16A34A"), Color(hex: "#059669")], startPoint: .leading, endPoint: .trailing)
-                            : LinearGradient(colors: [Color(hex: "#0088FF"), Color(hex: "#5856D6")], startPoint: .leading, endPoint: .trailing)
+                            ? Color(hex: "#1C1C1E")
+                            : Color(hex: "#0A84FF")
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .strokeBorder(
+                                    whisperEngine.isBackgroundEngineRunning ? Color(hex: "#30D158").opacity(0.45) : Color.clear,
+                                    lineWidth: 1
+                                )
                         )
                 )
             }
@@ -294,30 +229,30 @@ public struct ContentView: View {
 
             if let errorMsg = whisperEngine.lastErrorMessage {
                 HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundColor(Color(hex: "#FF9500"))
+                    Image(systemName: "exclamationmark.circle")
+                        .foregroundColor(Color(hex: "#FF9F0A"))
                     Text(errorMsg)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(Color(hex: "#FFCC00"))
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundColor(Color(hex: "#FF9F0A"))
                 }
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 10).fill(Color(hex: "#FF3B30").opacity(0.15)))
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.04)))
             }
 
-            // Zone de test de dictée en direct dans l'application
-            VStack(alignment: .leading, spacing: 10) {
+            // Zone d'essai de dictée
+            VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text("Zone de test de dictée en direct :")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(Color.white.opacity(0.88))
+                    Text("Aperçu de dictée")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(Color.white.opacity(0.65))
 
                     Spacer()
 
                     if whisperEngine.lastTranscriptionLatencyMs > 0 {
-                        Text("Dernière inférence : \(whisperEngine.lastTranscriptionLatencyMs) ms")
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                            .foregroundColor(Color(hex: "#34C759"))
+                        Text("\(whisperEngine.lastTranscriptionLatencyMs) ms • GPU Metal")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundColor(Color(hex: "#30D158"))
                     }
                 }
 
@@ -326,17 +261,17 @@ public struct ContentView: View {
                     .foregroundColor(.white)
                     .scrollContentBackground(.hidden)
                     .padding(10)
-                    .frame(minHeight: 105, maxHeight: 150)
+                    .frame(minHeight: 96, maxHeight: 140)
                     .background(
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color.black.opacity(0.45))
+                            .fill(Color(hex: "#0D0D11"))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
                             )
                     )
 
-                HStack(spacing: 10) {
+                HStack(spacing: 8) {
                     Button(action: {
                         UIPasteboard.general.string = whisperEngine.liveTestTranscript
                         showCopiedToast = true
@@ -344,11 +279,11 @@ public struct ContentView: View {
                             showCopiedToast = false
                         }
                     }) {
-                        Label(showCopiedToast ? "Copié !" : "Copier le texte", systemImage: showCopiedToast ? "checkmark" : "doc.on.doc")
-                            .font(.system(size: 12, weight: .semibold))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.10)))
+                        Label(showCopiedToast ? "Copié" : "Copier", systemImage: showCopiedToast ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 12, weight: .medium))
+                            .padding(.horizontal, 11)
+                            .padding(.vertical, 7)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.07)))
                             .foregroundColor(.white)
                     }
                     .buttonStyle(.plain)
@@ -361,12 +296,12 @@ public struct ContentView: View {
                             whisperEngine.liveTestTranscript = ""
                         }
                     }) {
-                        Label("↶ Effacer dernière phrase", systemImage: "arrow.uturn.backward")
-                            .font(.system(size: 12, weight: .semibold))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(RoundedRectangle(cornerRadius: 10).fill(Color(hex: "#FF9500").opacity(0.18)))
-                            .foregroundColor(Color(hex: "#FFCC00"))
+                        Label("Annuler phrase", systemImage: "arrow.uturn.backward")
+                            .font(.system(size: 12, weight: .medium))
+                            .padding(.horizontal, 11)
+                            .padding(.vertical, 7)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.07)))
+                            .foregroundColor(.white)
                     }
                     .buttonStyle(.plain)
 
@@ -375,52 +310,51 @@ public struct ContentView: View {
                     Button(action: {
                         whisperEngine.liveTestTranscript = ""
                     }) {
-                        Label("Vider", systemImage: "trash")
-                            .font(.system(size: 12, weight: .semibold))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(RoundedRectangle(cornerRadius: 10).fill(Color(hex: "#FF3B30").opacity(0.18)))
-                            .foregroundColor(Color(hex: "#FF3B30"))
+                        Text("Effacer")
+                            .font(.system(size: 12, weight: .medium))
+                            .padding(.horizontal, 11)
+                            .padding(.vertical, 7)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.07)))
+                            .foregroundColor(Color.white.opacity(0.75))
                     }
                     .buttonStyle(.plain)
                 }
             }
         }
-        .padding(20)
+        .padding(18)
         .background(cardBackgroundSurface)
     }
 
-    // MARK: - CARTE 2 : Sélecteur des 3 Modèles ("Whisper Flash", "Whisper PRO", "Whisper Expert")
+    // MARK: - Section 2 : Modèles Whisper Hors-Ligne (GPU Metal + FlashAttention)
 
-    private var card2WhisperModelsSelector: some View {
-        VStack(alignment: .leading, spacing: 16) {
+    private var card2ModelsSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
             cardSectionHeader(
-                icon: "cpu.fill",
-                iconColor: Color(hex: "#8A2BE2"),
-                title: "2. Modèles Whisper Hors-Ligne",
-                subtitle: "Whisper Flash • Whisper PRO • Whisper Expert (\(whisperEngine.optimalThreadCount) threads CPU + GPU Metal)"
+                icon: "cpu",
+                title: "Modèles IA Hors-Ligne",
+                subtitle: "Accélération GPU Metal + FlashAttention (\(whisperEngine.optimalThreadCount) cœurs Performance)"
             )
 
             if let dlError = modelDownloader.errorMessage {
                 HStack(spacing: 8) {
                     Image(systemName: "wifi.exclamationmark")
-                        .foregroundColor(Color(hex: "#FF3B30"))
+                        .foregroundColor(Color(hex: "#FF453A"))
                     Text(dlError)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(Color(hex: "#FF3B30"))
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundColor(Color(hex: "#FF453A"))
                 }
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 10).fill(Color(hex: "#FF3B30").opacity(0.14)))
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.04)))
             }
 
-            VStack(spacing: 12) {
+            VStack(spacing: 10) {
                 ForEach(WhisperModelTier.allCases) { tier in
                     modelTierCardView(for: tier)
                 }
             }
         }
-        .padding(20)
+        .padding(18)
         .background(cardBackgroundSurface)
     }
 
@@ -433,67 +367,65 @@ public struct ContentView: View {
 
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 8) {
                         Text(tier.displayName)
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .font(.system(size: 15, weight: .semibold))
                             .foregroundColor(.white)
 
                         if isRecommended {
-                            Text("Recommandé pour cet appareil")
-                                .font(.system(size: 10, weight: .heavy, design: .rounded))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(Capsule().fill(Color(hex: "#0088FF").opacity(0.28)))
-                                .foregroundColor(Color(hex: "#32ADE6"))
+                            Text("Recommandé")
+                                .font(.system(size: 10, weight: .semibold))
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(Color(hex: "#0A84FF").opacity(0.22)))
+                                .foregroundColor(Color(hex: "#0A84FF"))
                         }
                     }
 
                     Text(tier.subtitle)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(Color.white.opacity(0.68))
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundColor(Color.white.opacity(0.60))
                 }
 
                 Spacer()
 
                 if isDownloaded {
-                    Text("Prêt Hors-Ligne ✅")
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 4)
-                        .background(Capsule().fill(Color(hex: "#34C759").opacity(0.22)))
-                        .foregroundColor(Color(hex: "#34C759"))
+                    Text("Téléchargé")
+                        .font(.system(size: 11, weight: .medium))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Color.white.opacity(0.07)))
+                        .foregroundColor(Color(hex: "#30D158"))
                 }
             }
 
-            // Métriques techniques : Stockage, RAM, Vitesse, Fichier GGML
             HStack(spacing: 14) {
-                Label("\(tier.sizeMB) Mo disque", systemImage: "internaldrive")
+                Label("\(tier.sizeMB) Mo", systemImage: "internaldrive")
                 Label("\(tier.ramUsageMB) Mo RAM", systemImage: "memorychip")
-                Label(tier.latencyDescription, systemImage: "bolt.fill")
+                Label(tier.latencyDescription, systemImage: "bolt")
             }
-            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-            .foregroundColor(Color.white.opacity(0.75))
+            .font(.system(size: 11, weight: .regular, design: .monospaced))
+            .foregroundColor(Color.white.opacity(0.55))
 
             if isDownloading {
                 VStack(alignment: .leading, spacing: 6) {
                     ProgressView(value: progress, total: 1.0)
-                        .tint(Color(hex: "#0088FF"))
+                        .tint(Color(hex: "#0A84FF"))
                     HStack {
-                        Text("Téléchargement de \(tier.displayName) : \(Int(progress * 100)) %")
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                            .foregroundColor(Color(hex: "#32ADE6"))
+                        Text("Téléchargement : \(Int(progress * 100)) %")
+                            .font(.system(size: 11, weight: .regular, design: .monospaced))
+                            .foregroundColor(Color.white.opacity(0.75))
                         Spacer()
                         Button("Annuler") {
                             modelDownloader.cancelDownload(tier)
                         }
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(Color(hex: "#FF3B30"))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(Color(hex: "#FF453A"))
                     }
                 }
             }
 
-            // Boutons d'action du modèle
             HStack(spacing: 10) {
                 if isDownloaded {
                     Button(action: {
@@ -502,14 +434,14 @@ public struct ContentView: View {
                     }) {
                         HStack(spacing: 6) {
                             Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                            Text(isSelected ? "\(tier.displayName) Actif" : "Activer \(tier.displayName)")
+                            Text(isSelected ? "Modèle actif" : "Utiliser ce modèle")
                         }
-                        .font(.system(size: 12, weight: .bold))
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
+                        .font(.system(size: 12, weight: .semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
                         .background(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(isSelected ? Color(hex: "#0088FF") : Color.white.opacity(0.10))
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(isSelected ? Color(hex: "#0A84FF") : Color.white.opacity(0.08))
                         )
                         .foregroundColor(.white)
                     }
@@ -524,28 +456,28 @@ public struct ContentView: View {
                         modelDownloader.deleteModel(tier)
                     }) {
                         Image(systemName: "trash")
-                            .font(.system(size: 13, weight: .semibold))
-                            .padding(8)
-                            .background(RoundedRectangle(cornerRadius: 9).fill(Color(hex: "#FF3B30").opacity(0.18)))
-                            .foregroundColor(Color(hex: "#FF3B30"))
+                            .font(.system(size: 12, weight: .regular))
+                            .padding(7)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.06)))
+                            .foregroundColor(Color.white.opacity(0.65))
                     }
                     .buttonStyle(.plain)
                 } else if !isDownloading {
                     Button(action: {
                         modelDownloader.downloadModel(tier)
                     }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "arrow.down.circle.fill")
-                            Text("Télécharger \(tier.displayName) (\(tier.sizeMB) Mo)")
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.down.circle")
+                            Text("Télécharger (\(tier.sizeMB) Mo)")
                         }
-                        .font(.system(size: 12, weight: .bold))
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 9)
+                        .font(.system(size: 12, weight: .semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
                         .background(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(Color(hex: "#0088FF").opacity(0.26))
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Color.white.opacity(0.09))
                         )
-                        .foregroundColor(Color(hex: "#32ADE6"))
+                        .foregroundColor(.white)
                     }
                     .buttonStyle(.plain)
                 }
@@ -553,64 +485,54 @@ public struct ContentView: View {
         }
         .padding(14)
         .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(isSelected ? Color(hex: "#192136").opacity(0.95) : Color.black.opacity(0.35))
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(hex: "#0D0D11"))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .strokeBorder(
-                            isSelected ? Color(hex: "#0088FF") : Color.white.opacity(0.08),
-                            lineWidth: isSelected ? 1.8 : 1.0
+                            isSelected ? Color(hex: "#0A84FF").opacity(0.65) : Color.white.opacity(0.06),
+                            lineWidth: 1.0
                         )
                 )
         )
     }
 
-    // MARK: - CARTE 3 : Studio de Personnalisation des Couleurs de la Bulle
+    // MARK: - Section 3 : Apparence de l'Orbe
 
-    private var card3ColorCustomizationStudio: some View {
-        VStack(alignment: .leading, spacing: 18) {
+    private var card3AppearanceStudioSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
             cardSectionHeader(
-                icon: "paintpalette.fill",
-                iconColor: Color(hex: "#FF2A85"),
-                title: "3. Studio des Couleurs de l'Orbe",
-                subtitle: "Dictionnaires NSI + Roue chromatique + Recherche de 140+ couleurs FR/EN"
+                icon: "circle.hexagongrid",
+                title: "Apparence de l'Orbe",
+                subtitle: "Couleur de l'onde, fond de la sphère et thèmes spéciaux"
             )
 
-            // Sous-section A — Fond de la bulle (Background)
-            VStack(alignment: .leading, spacing: 10) {
-                Text("A. Fond de la sphère (Background) — Actuel : \(appGroup.bgHex)")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(.white)
+            // Fond de la sphère
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Fond de la sphère")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(Color.white.opacity(0.70))
 
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 10) {
+                    HStack(spacing: 8) {
                         ForEach(ThemeColors.orderedBackgrounds) { preset in
                             let isCurrentBg = (appGroup.bgHex.uppercased() == preset.hex.uppercased())
                             Button(action: {
                                 appGroup.bgHex = preset.hex
                             }) {
-                                HStack(spacing: 8) {
+                                HStack(spacing: 7) {
                                     Circle()
                                         .fill(Color(hex: preset.hex))
-                                        .frame(width: 20, height: 20)
-                                        .overlay(Circle().strokeBorder(Color.white.opacity(0.35), lineWidth: 1))
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        Text(preset.name)
-                                            .font(.system(size: 12, weight: .bold))
-                                        Text(preset.hex)
-                                            .font(.system(size: 10, weight: .regular, design: .monospaced))
-                                            .opacity(0.70)
-                                    }
+                                        .frame(width: 16, height: 16)
+                                        .overlay(Circle().strokeBorder(Color.white.opacity(0.30), lineWidth: 0.8))
+                                    Text(preset.name)
+                                        .font(.system(size: 12, weight: .medium))
                                 }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 7)
                                 .background(
-                                    RoundedRectangle(cornerRadius: 11, style: .continuous)
-                                        .fill(isCurrentBg ? Color(hex: "#0088FF").opacity(0.30) : Color.white.opacity(0.07))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                                                .strokeBorder(isCurrentBg ? Color(hex: "#0088FF") : Color.white.opacity(0.10), lineWidth: 1.2)
-                                        )
+                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                        .fill(isCurrentBg ? Color.white.opacity(0.16) : Color.white.opacity(0.05))
                                 )
                                 .foregroundColor(.white)
                             }
@@ -619,20 +541,20 @@ public struct ContentView: View {
                     }
                 }
 
-                ColorPicker("Spectre complet (Fond sur mesure)", selection: customBgColorBinding, supportsOpacity: false)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(Color.white.opacity(0.88))
+                ColorPicker("Couleur de fond personnalisée", selection: customBgColorBinding, supportsOpacity: false)
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundColor(Color.white.opacity(0.75))
             }
 
-            Divider().background(Color.white.opacity(0.12))
+            Divider().background(Color.white.opacity(0.08))
 
-            // Sous-section B — Onde lumineuse (Foreground) + Combos Spéciaux 1-Clic
-            VStack(alignment: .leading, spacing: 12) {
-                Text("B. Onde lumineuse (Foreground) — Actuelle : \(appGroup.fgHex)")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(.white)
+            // Onde lumineuse
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Couleur de l'onde")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(Color.white.opacity(0.70))
 
-                let columns = [GridItem(.adaptive(minimum: 52), spacing: 10)]
+                let columns = [GridItem(.adaptive(minimum: 48), spacing: 10)]
                 LazyVGrid(columns: columns, spacing: 10) {
                     ForEach(ThemeColors.orderedForegrounds) { preset in
                         let isCurrentFg = (appGroup.fgHex.uppercased() == preset.hex.uppercased())
@@ -642,19 +564,18 @@ public struct ContentView: View {
                             VStack(spacing: 4) {
                                 Circle()
                                     .fill(Color(hex: preset.hex))
-                                    .frame(width: 34, height: 34)
+                                    .frame(width: 30, height: 30)
                                     .overlay(
                                         Circle()
                                             .strokeBorder(
-                                                isCurrentFg ? Color.white : Color.white.opacity(0.25),
-                                                lineWidth: isCurrentFg ? 2.5 : 1.0
+                                                isCurrentFg ? Color.white : Color.white.opacity(0.20),
+                                                lineWidth: isCurrentFg ? 2.0 : 0.8
                                             )
                                     )
-                                    .shadow(color: Color(hex: preset.hex).opacity(0.45), radius: isCurrentFg ? 6 : 0)
 
                                 Text(preset.name.components(separatedBy: " ").first ?? preset.name)
-                                    .font(.system(size: 10, weight: isCurrentFg ? .bold : .medium))
-                                    .foregroundColor(isCurrentFg ? .white : Color.white.opacity(0.70))
+                                    .font(.system(size: 10, weight: .regular))
+                                    .foregroundColor(isCurrentFg ? .white : Color.white.opacity(0.60))
                                     .lineLimit(1)
                             }
                         }
@@ -662,28 +583,24 @@ public struct ContentView: View {
                     }
                 }
 
-                // Boutons rapides Combos Spéciaux en 1 clic
-                HStack(spacing: 10) {
+                HStack(spacing: 8) {
                     Button(action: {
                         appGroup.bgHex = "#050507"
                         appGroup.fgHex = "#050507"
                     }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "moon.stars.fill")
-                            Text("Combo Spécial : Noir sur Noir (Éclipse)")
-                                .font(.system(size: 12, weight: .bold))
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                                .fill(Color(hex: "#14141C"))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 11, style: .continuous)
-                                        .strokeBorder(Color.white.opacity(0.35), lineWidth: 1.2)
-                                )
-                        )
-                        .foregroundColor(.white)
+                        Text("Éclipse (Noir sur Noir)")
+                            .font(.system(size: 12, weight: .medium))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 9)
+                            .background(
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .fill(Color(hex: "#0D0D11"))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                            .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.8)
+                                    )
+                            )
+                            .foregroundColor(.white)
                     }
                     .buttonStyle(.plain)
 
@@ -691,229 +608,207 @@ public struct ContentView: View {
                         appGroup.bgHex = "#F8F9FA"
                         appGroup.fgHex = "#FFFFFF"
                     }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "sparkles")
-                            Text("Combo Spécial : Blanc sur Blanc (Perle Cristal)")
-                                .font(.system(size: 12, weight: .bold))
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                                .fill(Color(hex: "#F8F9FA"))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 11, style: .continuous)
-                                        .strokeBorder(Color(hex: "#CBD2D9"), lineWidth: 1.2)
-                                )
-                        )
-                        .foregroundColor(Color(hex: "#0F172A"))
+                        Text("Perle (Blanc sur Blanc)")
+                            .font(.system(size: 12, weight: .medium))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 9)
+                            .background(
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .fill(Color(hex: "#F8F9FA"))
+                            )
+                            .foregroundColor(Color(hex: "#1C1C1E"))
                     }
                     .buttonStyle(.plain)
                 }
 
-                ColorPicker("Spectre complet (Onde sur mesure)", selection: customFgColorBinding, supportsOpacity: false)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(Color.white.opacity(0.88))
+                ColorPicker("Couleur d'onde personnalisée", selection: customFgColorBinding, supportsOpacity: false)
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundColor(Color.white.opacity(0.75))
             }
 
-            Divider().background(Color.white.opacity(0.12))
+            Divider().background(Color.white.opacity(0.08))
 
-            // Sous-section C — Champ de recherche textuelle de couleur (ThemeColors.parseColorInput)
-            VStack(alignment: .leading, spacing: 10) {
-                Text("C. Recherche Textuelle Intelligente (140+ Couleurs FR/EN ou Code Hexa)")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(.white)
-
-                HStack(spacing: 10) {
+            // Recherche par nom ou code hexadécimal
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
-                        .foregroundColor(Color.white.opacity(0.55))
-                    TextField("Tapez une couleur (ex: crimson, turquoise, corail, or, #FF0055)...", text: $colorSearchText)
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.system(size: 13))
+                        .foregroundColor(Color.white.opacity(0.45))
+                    TextField("Rechercher une couleur (ex: turquoise, or, #FF0055)...", text: $colorSearchText)
+                        .font(.system(size: 13, weight: .regular))
                         .foregroundColor(.white)
                         .autocorrectionDisabled(true)
                         .textInputAutocapitalization(.never)
                     if !colorSearchText.isEmpty {
                         Button(action: { colorSearchText = "" }) {
                             Image(systemName: "xmark.circle.fill")
-                                .foregroundColor(Color.white.opacity(0.55))
+                                .foregroundColor(Color.white.opacity(0.45))
                         }
                         .buttonStyle(.plain)
                     }
                 }
-                .padding(11)
+                .padding(10)
                 .background(
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        .fill(Color.black.opacity(0.45))
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color(hex: "#0D0D11"))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                                .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
                         )
                 )
 
                 if let parsedHex = ThemeColors.parseColorInput(colorSearchText) {
-                    HStack(spacing: 12) {
+                    HStack(spacing: 10) {
                         Circle()
                             .fill(Color(hex: parsedHex))
-                            .frame(width: 32, height: 32)
-                            .overlay(Circle().strokeBorder(Color.white.opacity(0.45), lineWidth: 1.2))
+                            .frame(width: 26, height: 26)
+                            .overlay(Circle().strokeBorder(Color.white.opacity(0.35), lineWidth: 1))
 
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Couleur détectée : \(ThemeColors.displayName(for: parsedHex))")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundColor(.white)
-                            Text(parsedHex)
-                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                .foregroundColor(Color(hex: "#32ADE6"))
-                        }
+                        Text("\(ThemeColors.displayName(for: parsedHex)) (\(parsedHex))")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.white)
 
                         Spacer()
 
-                        Button("Appliquer à l'Onde") {
+                        Button("Onde") {
                             appGroup.fgHex = parsedHex
                         }
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.system(size: 11, weight: .semibold))
                         .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(RoundedRectangle(cornerRadius: 9).fill(Color(hex: "#0088FF")))
+                        .padding(.vertical, 6)
+                        .background(RoundedRectangle(cornerRadius: 7).fill(Color(hex: "#0A84FF")))
                         .foregroundColor(.white)
                         .buttonStyle(.plain)
 
-                        Button("Appliquer au Fond") {
+                        Button("Fond") {
                             appGroup.bgHex = parsedHex
                         }
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.system(size: 11, weight: .semibold))
                         .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(RoundedRectangle(cornerRadius: 9).fill(Color.white.opacity(0.14)))
+                        .padding(.vertical, 6)
+                        .background(RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(0.12)))
                         .foregroundColor(.white)
                         .buttonStyle(.plain)
                     }
-                    .padding(10)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.06)))
+                    .padding(8)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.04)))
                 }
             }
         }
-        .padding(20)
+        .padding(18)
         .background(cardBackgroundSurface)
     }
 
-    // MARK: - CARTE 4 : Optimisations Spéciales Goodnotes & Commandes Vocales
+    // MARK: - Section 4 : Préférences & Commandes Vocales
 
-    private var card4GoodnotesOptimizationsAndVoiceCommands: some View {
-        VStack(alignment: .leading, spacing: 16) {
+    private var card4PreferencesAndVoiceCommands: some View {
+        VStack(alignment: .leading, spacing: 14) {
             cardSectionHeader(
-                icon: "pencil.and.scribble",
-                iconColor: Color(hex: "#34C759"),
-                title: "4. Optimisations Goodnotes & Commandes Vocales",
-                subtitle: "Réglages de dictée mains-libres (VAD) et aide-mémoire pour vos copies d'examen"
+                icon: "slider.horizontal.3",
+                title: "Préférences & Commandes Vocales",
+                subtitle: "Ponctuation automatique, détection de fin de phrase et commandes"
             )
 
             Toggle(isOn: $appGroup.autoSpaceForGoodnotes) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Espace automatique après chaque phrase (Optimisé zones de texte Goodnotes)")
-                        .font(.system(size: 13, weight: .semibold))
+                    Text("Espace automatique après chaque phrase")
+                        .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.white)
-                    Text("Évite que deux phrases dictées consécutivement ne se collent dans Goodnotes")
+                    Text("Sépare proprement les phrases dictées à la suite")
                         .font(.system(size: 11))
-                        .foregroundColor(Color.white.opacity(0.60))
+                        .foregroundColor(Color.white.opacity(0.55))
                 }
             }
-            .toggleStyle(SwitchToggleStyle(tint: Color(hex: "#34C759")))
+            .toggleStyle(SwitchToggleStyle(tint: Color(hex: "#30D158")))
 
             Toggle(isOn: $appGroup.autoPunctuation) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Majuscule automatique en début de phrase")
-                        .font(.system(size: 13, weight: .semibold))
+                    Text("Majuscule et ponctuation automatiques")
+                        .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.white)
-                    Text("Assure une typographie française propre à chaque segment transcrit")
+                    Text("Ajoute majuscules et points en fin de phrase")
                         .font(.system(size: 11))
-                        .foregroundColor(Color.white.opacity(0.60))
+                        .foregroundColor(Color.white.opacity(0.55))
                 }
             }
-            .toggleStyle(SwitchToggleStyle(tint: Color(hex: "#0088FF")))
+            .toggleStyle(SwitchToggleStyle(tint: Color(hex: "#0A84FF")))
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text("Délai de pause (VAD) avant transcription automatique")
-                        .font(.system(size: 13, weight: .semibold))
+                    Text("Délai de pause automatique (VAD)")
+                        .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.white)
                     Spacer()
-                    Text(String(format: "%.1f s", appGroup.vadSilenceThresholdSeconds))
-                        .font(.system(size: 13, weight: .bold, design: .monospaced))
-                        .foregroundColor(Color(hex: "#32ADE6"))
+                    Text(String(format: "%.2f s", appGroup.vadSilenceThresholdSeconds))
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .foregroundColor(Color.white.opacity(0.80))
                 }
 
-                Slider(value: $appGroup.vadSilenceThresholdSeconds, in: 0.45...2.5, step: 0.05)
-                    .tint(Color(hex: "#0088FF"))
-
-                Text("En mode mains-libres, dès que vous faites une pause de \(String(format: "%.2f", appGroup.vadSilenceThresholdSeconds)) s, la phrase est transcrite sur le GPU Metal et insérée instantanément.")
-                    .font(.system(size: 11))
-                    .foregroundColor(Color.white.opacity(0.60))
+                Slider(value: $appGroup.vadSilenceThresholdSeconds, in: 0.45...2.0, step: 0.05)
+                    .tint(Color(hex: "#0A84FF"))
             }
 
-            Divider().background(Color.white.opacity(0.12))
+            Divider().background(Color.white.opacity(0.08))
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Aide-mémoire des commandes vocales françaises reconnues :")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(.white)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Commandes vocales disponibles")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(Color.white.opacity(0.70))
 
-                voiceCommandRow(spoken: "« À la ligne » ou « Nouveau paragraphe »", result: "Insère un retour à la ligne (\\n)")
-                voiceCommandRow(spoken: "« Double saut de ligne »", result: "Change de paragraphe (\\n\\n)")
-                voiceCommandRow(spoken: "« Effacer la dernière phrase »", result: "Supprime la dernière phrase dictée dans Goodnotes")
-                voiceCommandRow(spoken: "« Ouvrir les guillemets » / « Fermer les guillemets »", result: "Insère « et »")
+                voiceCommandRow(spoken: "« À la ligne » / « Nouveau paragraphe »", result: "Saut de ligne")
+                voiceCommandRow(spoken: "« Effacer la dernière phrase »", result: "Annule la dernière dictée")
                 voiceCommandRow(spoken: "« Point d'interrogation » / « Point d'exclamation »", result: "Insère ? ou !")
+                voiceCommandRow(spoken: "« Ouvrir les guillemets » / « Fermer les guillemets »", result: "Insère « et »")
             }
         }
-        .padding(20)
+        .padding(18)
         .background(cardBackgroundSurface)
     }
 
     private func voiceCommandRow(spoken: String, result: String) -> some View {
         HStack {
             Text(spoken)
-                .font(.system(size: 12, weight: .bold, design: .rounded))
-                .foregroundColor(Color(hex: "#32ADE6"))
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(Color.white.opacity(0.88))
             Spacer()
             Text(result)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(Color.white.opacity(0.75))
+                .font(.system(size: 11, weight: .regular))
+                .foregroundColor(Color.white.opacity(0.55))
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.05)))
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(hex: "#0D0D11")))
     }
 
-    // MARK: - CARTE 5 : Partage GitHub & Guide d'Activation Rapide
+    // MARK: - Section 5 : Partage GitHub & Guide d'Installation Universel
 
-    private var card5GitHubQRCodeAndSetupGuide: some View {
-        VStack(alignment: .leading, spacing: 16) {
+    private var card5GitHubAndSetupSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
             cardSectionHeader(
-                icon: "qrcode.viewfinder",
-                iconColor: Color(hex: "#FFCC00"),
-                title: "5. Partage GitHub (.ipa) & Guide d'Activation",
-                subtitle: "Scannez pour télécharger la dernière Release .ipa ou activer le clavier dans iPadOS"
+                icon: "qrcode",
+                title: "Partage & Installation",
+                subtitle: "Compatible avec tous les iPhone, iPad et Mac (Apple Silicon)"
             )
 
-            HStack(alignment: .center, spacing: 18) {
+            HStack(alignment: .center, spacing: 16) {
                 if let qrUIImage = generateHighContrastQRCode(from: githubReleasesURLString) {
                     Image(uiImage: qrUIImage)
                         .interpolation(.none)
                         .resizable()
                         .scaledToFit()
-                        .frame(width: 118, height: 118)
-                        .padding(8)
-                        .background(RoundedRectangle(cornerRadius: 14).fill(Color.white))
+                        .frame(width: 96, height: 96)
+                        .padding(6)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(Color.white))
                 }
 
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Dépôt & Releases Officielles")
-                        .font(.system(size: 14, weight: .bold))
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Releases GitHub (.ipa)")
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(.white)
 
                     Text(githubRepoURLString)
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundColor(Color(hex: "#32ADE6"))
+                        .font(.system(size: 11, weight: .regular, design: .monospaced))
+                        .foregroundColor(Color.white.opacity(0.60))
                         .lineLimit(2)
 
                     HStack(spacing: 8) {
@@ -924,63 +819,34 @@ public struct ContentView: View {
                                 showRepoCopiedToast = false
                             }
                         }) {
-                            Label(showRepoCopiedToast ? "Lien copié !" : "Copier le lien", systemImage: showRepoCopiedToast ? "checkmark" : "link")
-                                .font(.system(size: 12, weight: .bold))
-                                .padding(.horizontal, 11)
-                                .padding(.vertical, 8)
-                                .background(RoundedRectangle(cornerRadius: 9).fill(Color.white.opacity(0.12)))
+                            Label(showRepoCopiedToast ? "Copié" : "Copier", systemImage: showRepoCopiedToast ? "checkmark" : "link")
+                                .font(.system(size: 12, weight: .medium))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.08)))
                                 .foregroundColor(.white)
                         }
                         .buttonStyle(.plain)
 
                         if let url = URL(string: githubRepoURLString) {
                             Link(destination: url) {
-                                Label("Ouvrir GitHub", systemImage: "arrow.up.right.square.fill")
-                                    .font(.system(size: 12, weight: .bold))
-                                    .padding(.horizontal, 11)
-                                    .padding(.vertical, 8)
-                                    .background(RoundedRectangle(cornerRadius: 9).fill(Color(hex: "#0088FF")))
+                                Label("GitHub", systemImage: "arrow.up.right")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 7)
+                                    .background(RoundedRectangle(cornerRadius: 8).fill(Color(hex: "#0A84FF")))
                                     .foregroundColor(.white)
                             }
                         }
                     }
                 }
             }
-
-            Divider().background(Color.white.opacity(0.12))
-
-            // Encadré récapitulatif en 3 étapes
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Activation rapide en 3 étapes sur tout iPhone ou iPad :")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(.white)
-
-                setupStepRow(number: "1", text: "Téléchargez le modèle recommandé pour votre appareil (Whisper PRO ou Whisper Expert) dans la Carte 2 ci-dessus.")
-                setupStepRow(number: "2", text: "Ouvrez Réglages > Général > Clavier > Claviers > Ajouter un clavier > WhisperOrb et activez « Autoriser l'accès complet ».")
-                setupStepRow(number: "3", text: "Activez le Moteur Audio en Tâche de Fond (Carte 1), passez en Mode Avion, puis dictez dans n'importe quelle application !")
-            }
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.35)))
         }
-        .padding(20)
+        .padding(18)
         .background(cardBackgroundSurface)
     }
 
-    private func setupStepRow(number: String, text: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Text(number)
-                .font(.system(size: 11, weight: .black, design: .rounded))
-                .frame(width: 20, height: 20)
-                .background(Circle().fill(Color(hex: "#0088FF")))
-                .foregroundColor(.white)
-
-            Text(text)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(Color.white.opacity(0.85))
-        }
-    }
-
-    // MARK: - Générateur Natif CoreImage de QR Code Haute Définition
+    // MARK: - Générateur Natif CoreImage de QR Code
 
     private func generateHighContrastQRCode(from string: String) -> UIImage? {
         let context = CIContext()
@@ -994,65 +860,44 @@ public struct ContentView: View {
         return UIImage(cgImage: cgImage)
     }
 
-    // MARK: - Composants Visuels Partagés des Cartes
+    // MARK: - Composants Visuels Sobres
 
     private var cardBackgroundSurface: some View {
-        RoundedRectangle(cornerRadius: 22, style: .continuous)
-            .fill(Color(hex: "#14141C").opacity(0.94))
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .fill(Color(hex: "#131317"))
             .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.09), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.07), lineWidth: 1)
             )
     }
 
-    private func cardSectionHeader(icon: String, iconColor: Color, title: String, subtitle: String) -> some View {
-        HStack(alignment: .center, spacing: 12) {
+    private func cardSectionHeader(icon: String, title: String, subtitle: String) -> some View {
+        HStack(alignment: .center, spacing: 10) {
             Image(systemName: icon)
-                .font(.system(size: 22, weight: .bold))
-                .foregroundColor(iconColor)
-                .frame(width: 40, height: 40)
-                .background(RoundedRectangle(cornerRadius: 11).fill(iconColor.opacity(0.16)))
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(Color.white.opacity(0.85))
+                .frame(width: 32, height: 32)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.07)))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(.white)
                 Text(subtitle)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(Color.white.opacity(0.62))
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundColor(Color.white.opacity(0.55))
             }
         }
-    }
-
-    private var opticalModeBadge: some View {
-        let labelAndColor: (String, Color) = {
-            if ThemeColors.isBlackOnBlack(bgHex: appGroup.bgHex, fgHex: appGroup.fgHex) {
-                return ("Mode Éclipse (Noir/Noir)", Color(hex: "#8E8E93"))
-            } else if ThemeColors.isWhiteOnWhite(bgHex: appGroup.bgHex, fgHex: appGroup.fgHex) {
-                return ("Mode Perle Cristal (Blanc/Blanc)", Color(hex: "#32ADE6"))
-            } else if ThemeColors.isLowContrast(bgHex: appGroup.bgHex, fgHex: appGroup.fgHex) {
-                return ("Contour Contraste Auto", Color(hex: "#FFCC00"))
-            } else {
-                return ("Mode Standard 120 Hz", Color(hex: "#34C759"))
-            }
-        }()
-
-        return Text(labelAndColor.0)
-            .font(.system(size: 11, weight: .bold, design: .rounded))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(Capsule().fill(labelAndColor.1.opacity(0.20)))
-            .foregroundColor(labelAndColor.1)
     }
 
     private func statusColorForOrbState(_ state: WhisperOrbState) -> Color {
         switch state {
         case .idle:
-            return Color(hex: "#34C759")
+            return Color(hex: "#30D158")
         case .listening:
-            return Color(hex: "#0088FF")
+            return Color(hex: "#0A84FF")
         case .transcribing:
-            return Color(hex: "#FF9500")
+            return Color(hex: "#FFD60A")
         }
     }
 }

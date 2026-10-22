@@ -18,6 +18,8 @@ public enum WhisperOrbState: String, Codable, CaseIterable {
 }
 
 public struct GeminiBubbleView: View {
+    @Environment(\.scenePhase) private var scenePhase
+
     public let bgHex: String
     public let fgHex: String
     public let audioLevel: CGFloat
@@ -56,8 +58,20 @@ public struct GeminiBubbleView: View {
         !isBlackStealth && !isWhiteCrystal && ThemeColors.isLowContrast(bgHex: bgHex, fgHex: fgHex)
     }
 
+    private var targetFrameInterval: Double {
+        switch state {
+        case .idle:
+            return 1.0 / 24.0
+        case .listening:
+            return 1.0 / 60.0
+        case .transcribing:
+            return 1.0 / 24.0
+        }
+    }
+
     public var body: some View {
-        let animatedOrb = TimelineView(.animation(minimumInterval: 1.0 / 120.0, paused: false)) { timeline in
+        let isPaused = (scenePhase == .background || scenePhase == .inactive)
+        let animatedOrb = TimelineView(.animation(minimumInterval: targetFrameInterval, paused: isPaused)) { timeline in
             let phase = timeline.date.timeIntervalSinceReferenceDate
             let effectiveLevel = computeEffectiveLevel(phase: phase)
 
@@ -304,7 +318,7 @@ public struct GeminiBubbleView: View {
                     )
                 }
             }
-            .blur(radius: isLowContrastPair ? size * 0.02 : size * 0.07)
+            .blur(radius: state == .transcribing ? 0 : (isLowContrastPair ? size * 0.02 : size * 0.05))
 
             // Coeur incandescent en bas de la sphère pour l'effet volumétrique Gemini Live
             Circle()

@@ -31,6 +31,7 @@ public final class KeyboardViewController: UIInputViewController {
 
     public override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        AppGroupManager.shared.stopFastPolling()
         AppGroupManager.shared.persistAndBroadcastState(postDarwinNotification: false)
     }
 
