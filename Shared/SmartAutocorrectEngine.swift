@@ -370,7 +370,7 @@ public final class SmartAutocorrectEngine {
 
         // 1. Respect absolu de `user_style_memory.json` :
         // Si l'utilisateur a enregistré cette abréviation (ou tape la forme parlée), on la priorise !
-        let userMemoryPairs = UserStyleMemoryManager.shared.replacementsForLanguage(lang)
+        let userMemoryPairs = UserStyleMemoryManager.shared.replacements(for: lang)
         for pair in userMemoryPairs {
             if pair.written.lowercased() == lowerTyped {
                 // C'est une abréviation voulue par l'utilisateur (ex: "tkt", "bcp") -> On ne la corrige JAMAIS de force !
