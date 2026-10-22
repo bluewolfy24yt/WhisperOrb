@@ -22,8 +22,6 @@ targets:
           - "*.plist"
           - "*.entitlements"
       - path: Shared
-    info:
-      path: WhisperOrbApp/Info.plist
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.bluewolfy24yt.whisperorb
@@ -49,8 +47,6 @@ targets:
           - "*.plist"
           - "*.entitlements"
       - path: Shared
-    info:
-      path: WhisperKeyboard/Info.plist
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.bluewolfy24yt.whisperorb.keyboard

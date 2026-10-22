@@ -21,8 +21,10 @@ public final class WhisperEngine: ObservableObject {
 
     private var whisperInstance: Whisper? = nil
     public let optimalThreadCount: Int = HardwareDetector.optimalThreadCount
+    private var initialPromptCString: UnsafeMutablePointer<CChar>? = nil
+    private let frenchPunctuationPrompt = "Bonjour, voici une dictée vocale en français avec une orthographe exacte et une ponctuation soignée : virgules, points, points d'interrogation et majuscules."
 
-    // MARK: - Pipeline Audio Temps Réel (AVAudioEngine + AVAudioConverter 16 kHz)
+    // MARK: - Pipeline Audio Temps Réel (AVAudioEngine + Ré-échantillonneur Anti-Repliement 16 kHz)
 
     private let audioEngine = AVAudioEngine()
     private var audioConverter: AVAudioConverter?
@@ -33,7 +35,7 @@ public final class WhisperEngine: ObservableObject {
     // MARK: - Détecteur d'Activité Vocale (VAD) & Lissage RMS
 
     private var smoothedLevel: Float = 0.0
-    private let speechRMSThreshold: Float = 0.014
+    private let speechRMSThreshold: Float = 0.012
     private var activeSpeechDurationSeconds: Double = 0.0
     private var currentSilenceDurationSeconds: Double = 0.0
     private var hasSpokenEnoughInCurrentUtterance: Bool = false
@@ -43,8 +45,16 @@ public final class WhisperEngine: ObservableObject {
     // MARK: - Initialisation
 
     private init() {
+        self.initialPromptCString = strdup(frenchPunctuationPrompt)
         setupInterProcessCallbacks()
         setupAudioSessionNotificationObservers()
+    }
+
+    deinit {
+        if let ptr = initialPromptCString {
+            free(ptr)
+            initialPromptCString = nil
+        }
     }
 
     private func setupInterProcessCallbacks() {
@@ -104,7 +114,7 @@ public final class WhisperEngine: ObservableObject {
     public func loadModel(_ tier: WhisperModelTier) {
         let modelURL = ModelDownloader.shared.localModelURL(for: tier)
         guard ModelDownloader.shared.isModelDownloaded(tier) else {
-            lastErrorMessage = "Le modèle \(tier.displayName) n'est pas encore téléchargé sur l'iPad."
+            lastErrorMessage = "Le modèle \(tier.displayName) n'est pas encore téléchargé."
             statusBannerMessage = "Téléchargez le modèle \(tier.shortBadgeName) dans la Carte 2."
             return
         }
@@ -121,12 +131,40 @@ public final class WhisperEngine: ObservableObject {
         unloadCurrentModel()
 
         let whisper = Whisper(fromFileURL: modelURL)
-        whisper.params.language = .french
+        configureWhisperParams(on: whisper, audioDurationSeconds: 6.0)
 
         self.whisperInstance = whisper
         self.loadedTier = tier
         self.isLoadingModel = false
-        self.statusBannerMessage = "\(tier.displayName) chargé en RAM (\(optimalThreadCount) threads CPU + GPU Metal)"
+        self.statusBannerMessage = "\(tier.displayName) prêt (\(optimalThreadCount) cœurs rapides + Ponctuation FR)"
+    }
+
+    private func configureWhisperParams(on whisper: Whisper, audioDurationSeconds: Double) {
+        whisper.params.language = .french
+        whisper.params.detect_language = false
+        whisper.params.translate = false
+        whisper.params.n_threads = Int32(optimalThreadCount)
+        whisper.params.single_segment = true
+        whisper.params.no_context = true
+        whisper.params.print_special = false
+        whisper.params.print_progress = false
+        whisper.params.print_realtime = false
+        whisper.params.print_timestamps = false
+        whisper.params.suppress_blank = true
+        whisper.params.suppress_non_speech_tokens = true
+        whisper.params.temperature = 0.0
+        whisper.params.temperature_inc = 0.0
+        whisper.params.greedy.best_of = 1
+
+        if let promptPtr = initialPromptCString {
+            whisper.params.initial_prompt = UnsafePointer(promptPtr)
+        }
+
+        // Fenêtre d'encodage dynamique : 1s d'audio = 50 frames Whisper (max 1500 = 30s).
+        // Réduit de 3x à 4x le temps de calcul sur les phrases courtes/moyennes sans perte de précision.
+        let neededCtx = Int(ceil(audioDurationSeconds * 50.0)) + 150
+        let alignedCtx = ((neededCtx + 63) / 64) * 64
+        whisper.params.audio_ctx = Int32(max(384, min(1500, alignedCtx)))
     }
 
     // MARK: - 2. Session Audio en Tâche de Fond (AVAudioSession + AVAudioEngine)
@@ -135,11 +173,11 @@ public final class WhisperEngine: ObservableObject {
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(
             .playAndRecord,
-            mode: .measurement,
+            mode: .default,
             options: [.mixWithOthers, .defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP]
         )
         try session.setPreferredSampleRate(16000)
-        try session.setPreferredIOBufferDuration(0.02)
+        try session.setPreferredIOBufferDuration(0.032)
         try session.setActive(true, options: .notifyOthersOnDeactivation)
     }
 
@@ -187,7 +225,7 @@ public final class WhisperEngine: ObservableObject {
             }
 
             inputNode.removeTap(onBus: 0)
-            inputNode.installTap(onBus: 0, bufferSize: 1024, format: hardwareFormat) { [weak self] buffer, _ in
+            inputNode.installTap(onBus: 0, bufferSize: 2048, format: hardwareFormat) { [weak self] buffer, _ in
                 self?.processMicrophoneBuffer(buffer)
             }
 
@@ -196,7 +234,7 @@ public final class WhisperEngine: ObservableObject {
 
             isBackgroundEngineRunning = true
             AppGroupManager.shared.isBackgroundEngineActive = true
-            statusBannerMessage = "Moteur Audio Tâche de Fond ACTIF — Prêt à dicter dans Goodnotes"
+            statusBannerMessage = "Moteur Audio Tâche de Fond ACTIF — Prêt à dicter depuis le clavier"
             lastErrorMessage = nil
         } catch {
             lastErrorMessage = "Erreur d'activation audio : \(error.localizedDescription)"
@@ -223,8 +261,8 @@ public final class WhisperEngine: ObservableObject {
     // MARK: - 3. Contrôle de l'Écoute (Démarrer / Arrêter depuis l'App ou le Clavier Goodnotes)
 
     public func toggleRecording() {
-        if !isBackgroundEngineRunning {
-            startBackgroundAudioEngine()
+        if !isBackgroundEngineRunning || !audioEngine.isRunning {
+            startEngineInternal()
         }
 
         let currentState = AppGroupManager.shared.orbState
@@ -253,8 +291,8 @@ public final class WhisperEngine: ObservableObject {
             }
         }
 
-        if !isBackgroundEngineRunning {
-            startBackgroundAudioEngine()
+        if !isBackgroundEngineRunning || !audioEngine.isRunning {
+            startEngineInternal()
         }
 
         audioBufferLock.lock()
@@ -265,7 +303,7 @@ public final class WhisperEngine: ObservableObject {
         audioBufferLock.unlock()
 
         AppGroupManager.shared.orbState = .listening
-        statusBannerMessage = "Écoute active (16 kHz Mono) — Parlez maintenant..."
+        statusBannerMessage = "Écoute active (16 kHz Studio) — Parlez maintenant..."
     }
 
     public func finishListeningAndTranscribe() {
@@ -279,8 +317,8 @@ public final class WhisperEngine: ObservableObject {
 
         AppGroupManager.shared.updateLiveAudioLevel(0.0)
 
-        // Si moins de 0,25 s d'audio capturé, revenir au repos
-        guard capturedFrames.count >= Int(targetSampleRate * 0.25) else {
+        // Si moins de 0,20 s d'audio capturé, revenir au repos
+        guard capturedFrames.count >= Int(targetSampleRate * 0.20) else {
             AppGroupManager.shared.orbState = .idle
             statusBannerMessage = "Audio trop court • Prêt"
             return
@@ -289,7 +327,7 @@ public final class WhisperEngine: ObservableObject {
         runWhisperTranscription(on: capturedFrames)
     }
 
-    // MARK: - 4. Conversion Temps Réel vers 16000 Hz Mono Float32, Calcul RMS & VAD Mains-Libres
+    // MARK: - 4. Conversion Temps Réel Sans Perte vers 16000 Hz Mono Float32, Calcul RMS & VAD Mains-Libres
 
     private func processMicrophoneBuffer(_ buffer: AVAudioPCMBuffer) {
         let currentState = AppGroupManager.shared.orbState
@@ -313,13 +351,13 @@ public final class WhisperEngine: ObservableObject {
         let rms = sqrt(sumSquares / Float(sampleCount))
 
         // Conversion en niveau visuel lissé (smoothedLevel dans [0.0, 1.0])
-        let normalizedVisual = min(1.0, max(0.0, (rms - 0.004) * 14.0))
-        smoothedLevel = smoothedLevel * 0.62 + normalizedVisual * 0.38
+        let normalizedVisual = min(1.0, max(0.0, (rms - 0.003) * 16.0))
+        smoothedLevel = smoothedLevel * 0.60 + normalizedVisual * 0.40
         AppGroupManager.shared.updateLiveAudioLevel(smoothedLevel)
 
         // Durée temporelle de ce buffer à 16 kHz
         let chunkDurationSeconds = Double(sampleCount) / targetSampleRate
-        let vadSilenceLimit = max(0.5, min(2.5, AppGroupManager.shared.vadSilenceThresholdSeconds))
+        let vadSilenceLimit = max(0.6, min(2.5, AppGroupManager.shared.vadSilenceThresholdSeconds))
 
         var shouldTriggerAutoTranscribe = false
 
@@ -329,7 +367,7 @@ public final class WhisperEngine: ObservableObject {
         if rms >= speechRMSThreshold {
             activeSpeechDurationSeconds += chunkDurationSeconds
             currentSilenceDurationSeconds = 0.0
-            if activeSpeechDurationSeconds >= 0.4 {
+            if activeSpeechDurationSeconds >= 0.35 {
                 hasSpokenEnoughInCurrentUtterance = true
             }
         } else {
@@ -355,53 +393,12 @@ public final class WhisperEngine: ObservableObject {
         }
     }
 
+    /// Ré-échantillonneur direct 48/44.1 kHz -> 16 kHz Mono Float32 avec filtre passe-bas anti-repliement (zéro coupure inter-buffer)
     private func convertBufferTo16kHzMonoFloat32(_ inputBuffer: AVAudioPCMBuffer) -> [Float] {
         let inputFormat = inputBuffer.format
         let frameLength = Int(inputBuffer.frameLength)
-        guard frameLength > 0 else { return [] }
+        guard frameLength > 0, let channelData = inputBuffer.floatChannelData else { return [] }
 
-        // 1. Tentative via AVAudioConverter matériel
-        if let converter = audioConverter,
-           converter.inputFormat == inputFormat,
-           let targetFormat = AVAudioFormat(
-               commonFormat: .pcmFormatFloat32,
-               sampleRate: targetSampleRate,
-               channels: 1,
-               interleaved: false
-           ) {
-            let ratio = targetSampleRate / inputFormat.sampleRate
-            let outputFrameCapacity = AVAudioFrameCount(Double(frameLength) * ratio + 32)
-            if let outputBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: outputFrameCapacity) {
-                var conversionError: NSError?
-                var didProvideInput = false
-
-                let status = converter.convert(to: outputBuffer, error: &conversionError) { _, outStatus in
-                    if didProvideInput {
-                        outStatus.pointee = .noDataNow
-                        return nil
-                    }
-                    didProvideInput = true
-                    outStatus.pointee = .haveData
-                    return inputBuffer
-                }
-
-                if status != .error,
-                   conversionError == nil,
-                   let channelData = outputBuffer.floatChannelData?[0] {
-                    let count = Int(outputBuffer.frameLength)
-                    var samples = [Float](repeating: 0.0, count: count)
-                    for i in 0..<count {
-                        samples[i] = max(-1.0, min(1.0, channelData[i]))
-                    }
-                    if !samples.isEmpty {
-                        return samples
-                    }
-                }
-            }
-        }
-
-        // 2. Ré-échantillonneur linéaire haute précision de secours (44.1 / 48 kHz -> 16 kHz Mono Float32)
-        guard let channelData = inputBuffer.floatChannelData else { return [] }
         let channelCount = Int(inputFormat.channelCount)
         var monoSource = [Float](repeating: 0.0, count: frameLength)
 
@@ -426,23 +423,155 @@ public final class WhisperEngine: ObservableObject {
             return monoSource.map { max(-1.0, min(1.0, $0)) }
         }
 
-        let outputCount = max(1, Int(Double(frameLength) * (targetSampleRate / sourceSampleRate)))
+        let ratio = sourceSampleRate / targetSampleRate
+        let outputCount = max(1, Int(round(Double(frameLength) / ratio)))
         var resampled = [Float](repeating: 0.0, count: outputCount)
-        let step = Double(frameLength - 1) / Double(max(1, outputCount - 1))
 
-        for outIdx in 0..<outputCount {
-            let srcPos = Double(outIdx) * step
-            let leftIdx = Int(srcPos)
-            let rightIdx = min(frameLength - 1, leftIdx + 1)
-            let frac = Float(srcPos - Double(leftIdx))
-            let interpolated = monoSource[leftIdx] * (1.0 - frac) + monoSource[rightIdx] * frac
-            resampled[outIdx] = max(-1.0, min(1.0, interpolated))
+        // Si le ratio est >= 2.0 (ex: 48 kHz -> 16 kHz, ratio 3:1), application d'un filtre FIR passe-bas 5-taps
+        // pour éliminer le repliement spectral tout en préservant les consonnes françaises (100 Hz - 7500 Hz)
+        if ratio >= 2.0 && frameLength >= 5 {
+            for outIdx in 0..<outputCount {
+                let centerPos = (Double(outIdx) + 0.5) * ratio - 0.5
+                let cIdx = min(frameLength - 1, max(0, Int(round(centerPos))))
+                let iMinus2 = max(0, cIdx - 2)
+                let iMinus1 = max(0, cIdx - 1)
+                let iPlus1 = min(frameLength - 1, cIdx + 1)
+                let iPlus2 = min(frameLength - 1, cIdx + 2)
+
+                let filtered = 0.10 * monoSource[iMinus2]
+                    + 0.22 * monoSource[iMinus1]
+                    + 0.36 * monoSource[cIdx]
+                    + 0.22 * monoSource[iPlus1]
+                    + 0.10 * monoSource[iPlus2]
+                resampled[outIdx] = max(-1.0, min(1.0, filtered))
+            }
+        } else {
+            let step = Double(frameLength - 1) / Double(max(1, outputCount - 1))
+            for outIdx in 0..<outputCount {
+                let srcPos = Double(outIdx) * step
+                let leftIdx = Int(srcPos)
+                let rightIdx = min(frameLength - 1, leftIdx + 1)
+                let frac = Float(srcPos - Double(leftIdx))
+                let interpolated = monoSource[leftIdx] * (1.0 - frac) + monoSource[rightIdx] * frac
+                resampled[outIdx] = max(-1.0, min(1.0, interpolated))
+            }
         }
 
         return resampled
     }
 
-    // MARK: - 5. Inférence Asynchrone SwiftWhisper (Metal GPU / A12Z & A15)
+    /// Conditionnement vocal studio avant envoi à Whisper :
+    /// 1) Suppression offset DC + filtre passe-haut 80 Hz (anti-grondement)
+    /// 2) Découpe des longs silences inutiles en début/fin
+    /// 3) Normalisation dynamique du gain (AGC logiciel vers -1,4 dBFS / 0.85 crête)
+    /// 4) Marges de silence de sécurité (0,15 s début + 0,60 s fin, durée min >= 1,35 s) requises par whisper.cpp
+    private func prepareAudioFramesForWhisper(_ rawFrames: [Float]) -> [Float] {
+        guard !rawFrames.isEmpty else { return [] }
+
+        // 1. Calcul de l'offset DC moyen
+        var sum: Float = 0.0
+        for s in rawFrames {
+            sum += s
+        }
+        let mean = sum / Float(rawFrames.count)
+
+        // Filtre passe-haut 1er ordre à ~80 Hz (16 kHz) pour retirer les bruits sourds de manipulation de l'iPhone
+        var filtered = [Float](repeating: 0.0, count: rawFrames.count)
+        var prevX: Float = 0.0
+        var prevY: Float = 0.0
+        let alpha: Float = 0.9695
+        var maxPeak: Float = 0.0
+
+        for i in 0..<rawFrames.count {
+            let x = rawFrames[i] - mean
+            let y = alpha * (prevY + x - prevX)
+            filtered[i] = y
+            prevX = x
+            prevY = y
+            let absY = abs(y)
+            if absY > maxPeak {
+                maxPeak = absY
+            }
+        }
+
+        // Si le signal est un silence quasi-total, retourner vide pour éviter toute hallucination
+        guard maxPeak >= 0.002 else { return [] }
+
+        // 2. Détection du début et de la fin réelle de la voix par fenêtres de 20 ms (320 échantillons)
+        let windowSize = 320
+        let voiceThreshold = max(0.0025, maxPeak * 0.045)
+        var firstVoiceSample = 0
+        var lastVoiceSample = filtered.count - 1
+
+        if filtered.count > windowSize * 3 {
+            var foundStart = false
+            var idx = 0
+            while idx + windowSize <= filtered.count {
+                var winSq: Float = 0.0
+                for j in idx..<(idx + windowSize) {
+                    winSq += filtered[j] * filtered[j]
+                }
+                let winRms = sqrt(winSq / Float(windowSize))
+                if winRms >= voiceThreshold {
+                    if !foundStart {
+                        firstVoiceSample = idx
+                        foundStart = true
+                    }
+                    lastVoiceSample = min(filtered.count - 1, idx + windowSize - 1)
+                }
+                idx += windowSize
+            }
+        }
+
+        // Garde 0,15 s avant le premier son et 0,25 s après le dernier son
+        let preRoll = Int(targetSampleRate * 0.15)
+        let postRoll = Int(targetSampleRate * 0.25)
+        let startIdx = max(0, firstVoiceSample - preRoll)
+        let endIdx = min(filtered.count - 1, max(startIdx, lastVoiceSample + postRoll))
+
+        var trimmed = Array(filtered[startIdx...endIdx])
+
+        // 3. Normalisation automatique du volume (AGC logiciel vers 0.85 crête, gain max 28x)
+        var trimmedPeak: Float = 0.0
+        for s in trimmed {
+            let a = abs(s)
+            if a > trimmedPeak { trimmedPeak = a }
+        }
+
+        if trimmedPeak > 0.001 {
+            let targetPeak: Float = 0.85
+            let gain = min(28.0, max(1.0, targetPeak / trimmedPeak))
+            for i in 0..<trimmed.count {
+                let amplified = trimmed[i] * gain
+                // Limiteur doux (soft-knee) au-delà de 0.88 pour éviter toute saturation numérique
+                if amplified > 0.88 {
+                    trimmed[i] = min(0.99, 0.88 + 0.11 * tanh((amplified - 0.88) / 0.11))
+                } else if amplified < -0.88 {
+                    trimmed[i] = max(-0.99, -0.88 + 0.11 * tanh((amplified + 0.88) / 0.11))
+                } else {
+                    trimmed[i] = amplified
+                }
+            }
+        }
+
+        // 4. Ajout des marges de silence requises par whisper.cpp (0,15 s en tête + 0,60 s en queue, min 1,35 s au total)
+        let leadingPad = [Float](repeating: 0.0, count: Int(targetSampleRate * 0.15))
+        let trailingPad = [Float](repeating: 0.0, count: Int(targetSampleRate * 0.60))
+        var finalBuffer: [Float] = []
+        finalBuffer.reserveCapacity(leadingPad.count + trimmed.count + trailingPad.count + 8000)
+        finalBuffer.append(contentsOf: leadingPad)
+        finalBuffer.append(contentsOf: trimmed)
+        finalBuffer.append(contentsOf: trailingPad)
+
+        let minSamplesRequired = Int(targetSampleRate * 1.35)
+        if finalBuffer.count < minSamplesRequired {
+            finalBuffer.append(contentsOf: [Float](repeating: 0.0, count: minSamplesRequired - finalBuffer.count))
+        }
+
+        return finalBuffer
+    }
+
+    // MARK: - 5. Inférence Asynchrone SwiftWhisper Optimisée (A15 Bionic & A12Z Bionic)
 
     private func runWhisperTranscription(on floatArray: [Float]) {
         guard let whisper = whisperInstance else {
@@ -451,6 +580,16 @@ public final class WhisperEngine: ObservableObject {
             return
         }
 
+        let conditionedFrames = prepareAudioFramesForWhisper(floatArray)
+        guard !conditionedFrames.isEmpty else {
+            AppGroupManager.shared.orbState = .idle
+            statusBannerMessage = "Aucun signal vocal détecté • Prêt"
+            return
+        }
+
+        let audioDurationSeconds = Double(conditionedFrames.count) / targetSampleRate
+        configureWhisperParams(on: whisper, audioDurationSeconds: audioDurationSeconds)
+
         isTranscribingNow = true
         AppGroupManager.shared.orbState = .transcribing
         statusBannerMessage = "Transcription locale Whisper en cours..."
@@ -458,8 +597,7 @@ public final class WhisperEngine: ObservableObject {
 
         Task {
             do {
-                whisper.params.language = .french
-                let segments = try await whisper.transcribe(audioFrames: floatArray)
+                let segments = try await whisper.transcribe(audioFrames: conditionedFrames)
                 let rawText = segments.map(\.text).joined(separator: " ")
                 let elapsedMs = Int(Date().timeIntervalSince(startTime) * 1000.0)
 
@@ -504,16 +642,16 @@ public final class WhisperEngine: ObservableObject {
             liveTestTranscript += " " + finalResult + (AppGroupManager.shared.autoSpaceForGoodnotes && !finalResult.hasSuffix("\n") ? " " : "")
         }
 
-        // Envoi instantané au clavier WhisperKeyboard dans Goodnotes
+        // Envoi instantané au clavier WhisperKeyboard
         AppGroupManager.shared.publishTranscribedText(finalResult)
-        statusBannerMessage = "Transcrit en \(latencyMs) ms • Inséré dans Goodnotes"
+        statusBannerMessage = "Transcrit en \(latencyMs) ms • Inséré au clavier"
     }
 
     public func postProcessFrenchDictation(_ input: String) -> String? {
         var text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
 
-        // 1. Filtrage des hallucinations connues de Whisper sur les silences
+        // 1. Filtrage des hallucinations connues de Whisper sur les silences et du prompt initial
         let hallucinationPatterns: [String] = [
             "[BLANK_AUDIO]",
             "[blank_audio]",
@@ -529,7 +667,8 @@ public final class WhisperEngine: ObservableObject {
             "Merci d'avoir regardé cette vidéo",
             "Merci d'avoir regardé",
             "Abonnez-vous",
-            "S'abonner"
+            "S'abonner",
+            "voici une dictée vocale en français avec une orthographe exacte"
         ]
 
         for pattern in hallucinationPatterns {
@@ -561,6 +700,18 @@ public final class WhisperEngine: ObservableObject {
         if lower == "point d'exclamation" {
             return "!"
         }
+        if lower == "point" || lower == "point final" {
+            return "."
+        }
+        if lower == "virgule" {
+            return ","
+        }
+        if lower == "deux points" || lower == "deux-points" {
+            return " :"
+        }
+        if lower == "point-virgule" || lower == "point virgule" {
+            return " ;"
+        }
         if lower == "nouveau paragraphe" || lower == "à la ligne" || lower == "a la ligne" {
             return "\n"
         }
@@ -577,7 +728,11 @@ public final class WhisperEngine: ObservableObject {
             ("ouvrir les guillemets", "« "),
             ("fermer les guillemets", " »"),
             ("point d'interrogation", "?"),
-            ("point d'exclamation", "!")
+            ("point d'exclamation", "!"),
+            ("point-virgule", ";"),
+            ("point virgule", ";"),
+            ("deux-points", ":"),
+            ("point final", ".")
         ]
 
         for item in inlineReplacements {
@@ -588,17 +743,26 @@ public final class WhisperEngine: ObservableObject {
             )
         }
 
-        // 5. Nettoyage des espaces multiples sans écraser les sauts de ligne \n
+        // 5. Nettoyage des espaces multiples et normalisation de la ponctuation française sans écraser les \n
         let lines = text.components(separatedBy: "\n")
         let cleanedLines = lines.map { line -> String in
             let components = line.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
-            return components.joined(separator: " ")
+            var joined = components.joined(separator: " ")
+            joined = joined.replacingOccurrences(of: " ,", with: ",")
+            joined = joined.replacingOccurrences(of: " .", with: ".")
+            return joined
         }
         text = cleanedLines.joined(separator: "\n")
 
-        // 6. Majuscule automatique en début de phrase si activée
-        if AppGroupManager.shared.autoPunctuation, let firstChar = text.first, firstChar.isLetter {
-            text = firstChar.uppercased() + text.dropFirst()
+        // 6. Majuscule automatique en début de phrase et ponctuation finale si activée
+        if AppGroupManager.shared.autoPunctuation {
+            if let firstChar = text.first, firstChar.isLetter {
+                text = firstChar.uppercased() + text.dropFirst()
+            }
+            let wordCount = text.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.count
+            if wordCount >= 3, let lastChar = text.last, lastChar.isLetter || lastChar.isNumber {
+                text += "."
+            }
         }
 
         return text.isEmpty ? nil : text

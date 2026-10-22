@@ -57,7 +57,7 @@ public struct GeminiBubbleView: View {
     }
 
     public var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 120.0, paused: false)) { timeline in
+        let animatedOrb = TimelineView(.animation(minimumInterval: 1.0 / 120.0, paused: false)) { timeline in
             let phase = timeline.date.timeIntervalSinceReferenceDate
             let effectiveLevel = computeEffectiveLevel(phase: phase)
 
@@ -78,10 +78,16 @@ public struct GeminiBubbleView: View {
                         y: size * 0.06
                     )
             }
-            .contentShape(Circle())
-            .onTapGesture {
-                onTap?()
-            }
+        }
+        .contentShape(Rectangle())
+
+        if let onTap = onTap {
+            animatedOrb
+                .onTapGesture {
+                    onTap()
+                }
+        } else {
+            animatedOrb
         }
     }
 

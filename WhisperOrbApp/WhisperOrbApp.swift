@@ -20,8 +20,19 @@ struct WhisperOrbApp: App {
                 .onAppear {
                     modelDownloader.refreshDownloadedModels()
                     let currentTier = appGroup.selectedModel
-                    if modelDownloader.isModelDownloaded(currentTier) && whisperEngine.loadedTier == nil {
-                        whisperEngine.loadModel(currentTier)
+                    if modelDownloader.isModelDownloaded(currentTier) {
+                        if whisperEngine.loadedTier == nil {
+                            whisperEngine.loadModel(currentTier)
+                        }
+                        if !whisperEngine.isBackgroundEngineRunning {
+                            whisperEngine.startBackgroundAudioEngine()
+                        }
+                    } else if let anyTier = WhisperModelTier.allCases.first(where: { modelDownloader.isModelDownloaded($0) }) {
+                        appGroup.selectedModel = anyTier
+                        whisperEngine.loadModel(anyTier)
+                        if !whisperEngine.isBackgroundEngineRunning {
+                            whisperEngine.startBackgroundAudioEngine()
+                        }
                     }
                 }
         }
@@ -30,6 +41,9 @@ struct WhisperOrbApp: App {
             case .active:
                 appGroup.reloadStateFromChannels()
                 modelDownloader.refreshDownloadedModels()
+                if !whisperEngine.isBackgroundEngineRunning && !modelDownloader.downloadedModels.isEmpty {
+                    whisperEngine.startBackgroundAudioEngine()
+                }
             case .inactive, .background:
                 appGroup.persistAndBroadcastState(postDarwinNotification: true)
             @unknown default:

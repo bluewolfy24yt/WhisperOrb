@@ -162,27 +162,35 @@ public struct KeyboardLayoutView: View {
 
     private var topVoiceControlBar: some View {
         HStack(spacing: isIPad ? 10 : 6) {
-            // Pastille d'état en direct
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(statusIndicatorColor)
-                    .frame(width: 8, height: 8)
+            // Pastille d'état en direct (cliquable elle aussi pour lancer/arrêter l'écoute)
+            Button(action: {
+                let generator = UIImpactFeedbackGenerator(style: .medium)
+                generator.impactOccurred()
+                appGroup.requestToggleRecordingFromKeyboard()
+            }) {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(statusIndicatorColor)
+                        .frame(width: 8, height: 8)
 
-                Text(liveStatusTitle)
-                    .font(.system(size: isIPad ? 12 : 11, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                    .lineLimit(1)
+                    Text(liveStatusTitle)
+                        .font(.system(size: isIPad ? 12 : 11, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, isIPad ? 11 : 8)
+                .padding(.vertical, 7)
+                .background(
+                    Capsule()
+                        .fill(Color.white.opacity(0.08))
+                        .overlay(
+                            Capsule()
+                                .strokeBorder(statusIndicatorColor.opacity(0.45), lineWidth: 1)
+                        )
+                )
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, isIPad ? 11 : 8)
-            .padding(.vertical, 7)
-            .background(
-                Capsule()
-                    .fill(Color.white.opacity(0.08))
-                    .overlay(
-                        Capsule()
-                            .strokeBorder(statusIndicatorColor.opacity(0.45), lineWidth: 1)
-                    )
-            )
+            .buttonStyle(.plain)
 
             // Bouton rapide "↶ Effacer phrase"
             Button(action: {
@@ -233,46 +241,43 @@ public struct KeyboardLayoutView: View {
 
             Spacer()
 
-            if showQuickOrbPopover {
-                Button(action: {
-                    withAnimation(.spring(response: 0.25, dampingFraction: 0.82)) {
-                        showQuickOrbPopover = false
-                    }
-                }) {
-                    Text("Fermer ✕")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Capsule().fill(Color.white.opacity(0.16)))
+            // Bouton d'accès direct au mini-sélecteur de modèle/couleur (sans bloquer le tap de l'orbe)
+            Button(action: {
+                let generator = UIImpactFeedbackGenerator(style: .light)
+                generator.impactOccurred()
+                withAnimation(.spring(response: 0.26, dampingFraction: 0.82)) {
+                    showQuickOrbPopover.toggle()
                 }
-                .buttonStyle(.plain)
+            }) {
+                Text(showQuickOrbPopover ? "Fermer ✕" : "⚙️")
+                    .font(.system(size: isIPad ? 13 : 12, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, showQuickOrbPopover ? 10 : 8)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(Color.white.opacity(0.14)))
             }
+            .buttonStyle(.plain)
 
-            // La Bulle GeminiBubbleView (size: 46) animée à 120 FPS (Tap = Dicter, Appui long 0,6 s = Mini-sélecteur)
-            GeminiBubbleView(
-                bgHex: appGroup.bgHex,
-                fgHex: appGroup.fgHex,
-                audioLevel: CGFloat(appGroup.currentAudioLevel),
-                state: appGroup.orbState,
-                size: 46,
-                showSideTab: true,
-                onTap: {
-                    let generator = UIImpactFeedbackGenerator(style: .medium)
-                    generator.impactOccurred()
-                    appGroup.requestToggleRecordingFromKeyboard()
-                }
-            )
-            .simultaneousGesture(
-                LongPressGesture(minimumDuration: 0.6)
-                    .onEnded { _ in
-                        let generator = UIImpactFeedbackGenerator(style: .heavy)
-                        generator.impactOccurred()
-                        withAnimation(.spring(response: 0.28, dampingFraction: 0.80)) {
-                            showQuickOrbPopover.toggle()
-                        }
-                    }
-            )
+            // La Bulle GeminiBubbleView (size: 46) animée à 120 FPS dans un vrai Button natif ultra-réactif
+            Button(action: {
+                let generator = UIImpactFeedbackGenerator(style: .medium)
+                generator.impactOccurred()
+                appGroup.requestToggleRecordingFromKeyboard()
+            }) {
+                GeminiBubbleView(
+                    bgHex: appGroup.bgHex,
+                    fgHex: appGroup.fgHex,
+                    audioLevel: CGFloat(appGroup.currentAudioLevel),
+                    state: appGroup.orbState,
+                    size: 46,
+                    showSideTab: true,
+                    onTap: nil
+                )
+                .padding(.leading, 8)
+                .padding(.vertical, 2)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 4)
     }

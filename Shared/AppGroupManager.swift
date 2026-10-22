@@ -217,6 +217,7 @@ public struct WhisperSharedStatePayload: Codable, Equatable {
     public var autoPunctuation: Bool
     public var vadSilenceThresholdSeconds: Double
     public var isBackgroundEngineActive: Bool
+    public var toggleRecordingRequestCount: Int?
     public var updatedAt: TimeInterval
 }
 
@@ -225,7 +226,26 @@ public struct WhisperSharedStatePayload: Codable, Equatable {
 public final class AppGroupManager: ObservableObject {
     public static let shared = AppGroupManager()
 
-    public static let appGroupIdentifier = "group.com.bluewolfy24yt.whisperorb"
+    /// Détecte dynamiquement l'App Group réel (compatible avec le suffixe Team ID ajouté par isideload / SideStore / AltStore)
+    public static let appGroupIdentifier: String = {
+        let fallbackGroup = "group.com.bluewolfy24yt.whisperorb"
+        if let bundleId = Bundle.main.bundleIdentifier {
+            let baseBundleId: String
+            if bundleId.hasSuffix(".keyboard") {
+                baseBundleId = String(bundleId.dropLast(".keyboard".count))
+            } else if bundleId.hasSuffix(".WhisperKeyboard") {
+                baseBundleId = String(bundleId.dropLast(".WhisperKeyboard".count))
+            } else {
+                baseBundleId = bundleId
+            }
+            let dynamicCandidate = "group.\(baseBundleId)"
+            if FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: dynamicCandidate) != nil {
+                return dynamicCandidate
+            }
+        }
+        return fallbackGroup
+    }()
+
     public static let darwinToggleRecordingNotification = "com.bluewolfy24yt.whisperorb.toggleRecording"
     public static let darwinStateUpdatedNotification = "com.bluewolfy24yt.whisperorb.stateUpdated"
     public static let pasteboardBusName = UIPasteboard.Name("com.bluewolfy24yt.whisperorb.bus")
@@ -281,6 +301,9 @@ public final class AppGroupManager: ObservableObject {
     private var isApplyingRemoteUpdate: Bool = false
     private var pollingTimer: Timer?
     private var lastAppliedTimestamp: TimeInterval = 0
+    private var toggleRecordingRequestCount: Int = 0
+    private var lastHandledToggleRequestCount: Int = 0
+    private var lastToggleTriggerTime: TimeInterval = 0
 
     private enum Keys {
         static let hasLaunchedBefore = "whisperorb.hasLaunchedBefore"
@@ -317,7 +340,7 @@ public final class AppGroupManager: ObservableObject {
         CFNotificationCenterRemoveEveryObserver(center, Unmanaged.passUnretained(self).toOpaque())
     }
 
-    // MARK: - Répertoires Partagés (App Group avec Fallback Documents)
+    // MARK: - Répertoires Partagés (App Group avec Conservation des Modèles Déjà Téléchargés)
 
     public var sharedContainerURL: URL {
         if let groupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: Self.appGroupIdentifier) {
@@ -326,15 +349,19 @@ public final class AppGroupManager: ObservableObject {
         return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
     }
 
+    /// Conserve le dossier Documents/Models de l'application principale pour ne jamais perdre les modèles déjà téléchargés lors d'une MAJ
     public var modelsDirectoryURL: URL {
-        let dir = sharedContainerURL.appendingPathComponent("Models", isDirectory: true)
-        if !FileManager.default.fileExists(atPath: dir.path) {
-            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            var resourceValues = URLResourceValues()
-            resourceValues.isExcludedFromBackup = true
-            var mutableDir = dir
-            try? mutableDir.setResourceValues(resourceValues)
+        let docsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let docsModelsDir = docsURL.appendingPathComponent("Models", isDirectory: true)
+        if FileManager.default.fileExists(atPath: docsModelsDir.path) {
+            return docsModelsDir
         }
+        let dir = docsModelsDir
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        var resourceValues = URLResourceValues()
+        resourceValues.isExcludedFromBackup = true
+        var mutableDir = dir
+        try? mutableDir.setResourceValues(resourceValues)
         return dir
     }
 
@@ -361,6 +388,7 @@ public final class AppGroupManager: ObservableObject {
             autoPunctuation: autoPunctuation,
             vadSilenceThresholdSeconds: vadSilenceThresholdSeconds,
             isBackgroundEngineActive: isBackgroundEngineActive,
+            toggleRecordingRequestCount: toggleRecordingRequestCount,
             updatedAt: now
         )
 
@@ -425,16 +453,32 @@ public final class AppGroupManager: ObservableObject {
             return
         }
 
-        guard freshest.updatedAt >= lastAppliedTimestamp else {
+        // Vérifie d'abord si un nouvel appui sur l'orbe du clavier a été demandé via le payload partagé
+        let remoteToggleCount = freshest.toggleRecordingRequestCount ?? 0
+        var shouldFireToggleCallback = false
+        if remoteToggleCount > self.toggleRecordingRequestCount {
+            self.toggleRecordingRequestCount = remoteToggleCount
+            if remoteToggleCount > self.lastHandledToggleRequestCount {
+                self.lastHandledToggleRequestCount = remoteToggleCount
+                shouldFireToggleCallback = true
+            }
+        }
+
+        guard freshest.updatedAt >= lastAppliedTimestamp || shouldFireToggleCallback else {
             return
         }
 
-        lastAppliedTimestamp = freshest.updatedAt
+        lastAppliedTimestamp = max(lastAppliedTimestamp, freshest.updatedAt)
 
         let applyBlock = { [weak self] in
             guard let self = self else { return }
             self.isApplyingRemoteUpdate = true
-            defer { self.isApplyingRemoteUpdate = false }
+            defer {
+                self.isApplyingRemoteUpdate = false
+                if shouldFireToggleCallback {
+                    self.dispatchDebouncedToggleRecording()
+                }
+            }
 
             if self.bgHex != freshest.bgHex { self.bgHex = freshest.bgHex }
             if self.fgHex != freshest.fgHex { self.fgHex = freshest.fgHex }
@@ -477,10 +521,20 @@ public final class AppGroupManager: ObservableObject {
         }
     }
 
+    private func dispatchDebouncedToggleRecording() {
+        let now = Date().timeIntervalSince1970
+        guard now - lastToggleTriggerTime > 0.25 else { return }
+        lastToggleTriggerTime = now
+        onToggleRecordingRequested?()
+    }
+
     // MARK: - Actions Métier Clavier <-> Application
 
-    /// Appelé par le clavier quand l'élève touche la bulle GeminiBubbleView
+    /// Appelé par le clavier quand l'élève touche la bulle GeminiBubbleView (ou la pastille d'état)
     public func requestToggleRecordingFromKeyboard() {
+        toggleRecordingRequestCount += 1
+        lastHandledToggleRequestCount = toggleRecordingRequestCount
+        persistAndBroadcastState(postDarwinNotification: true)
         postDarwinNotificationNamed(Self.darwinToggleRecordingNotification)
     }
 
@@ -567,7 +621,7 @@ public final class AppGroupManager: ObservableObject {
                 let manager = Unmanaged<AppGroupManager>.fromOpaque(observer).takeUnretainedValue()
                 DispatchQueue.main.async {
                     manager.reloadStateFromChannels()
-                    manager.onToggleRecordingRequested?()
+                    manager.dispatchDebouncedToggleRecording()
                 }
             },
             Self.darwinToggleRecordingNotification as CFString,
