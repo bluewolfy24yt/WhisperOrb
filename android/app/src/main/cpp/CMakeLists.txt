@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if(ANDROID_ABI STREQUAL "arm64-v8a")
-    add_compile_options(-march=armv8.2-a+fp16+dotprod -O3 -ffast-math)
+    add_compile_options(-march=armv8.2-a+fp16+dotprod -O3 -fno-finite-math-only)
 endif()
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
