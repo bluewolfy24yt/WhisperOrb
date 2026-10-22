@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.Point
 import android.graphics.Rect
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -31,6 +32,7 @@ import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -59,7 +61,7 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
 
         fun requestRefresh() {
             activeInstance?.mainHandler?.post {
-                activeInstance?.evaluateWindowsAndSyncOverlay()
+                activeInstance?.triggerBurstTracking()
             }
         }
     }
@@ -69,14 +71,26 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
     private lateinit var engine: WhisperAndroidEngine
     private lateinit var downloader: ModelDownloader
 
-    // États des 3 modes d'incrustation Gboard
+    // Coordonnées écran réelles (getBoundsInScreen / getLocationOnScreen) de Gboard
     private var isImeWindowVisible: Boolean = false
-    private var currentImeHeightPx: Int = 0
-    private var lastKnownGboardHeightPx: Int = 0
+    private var currentImeTopScreenY: Int = 0
+    private var currentImeBottomScreenY: Int = 0
+    private var lastKnownImeTopScreenY: Int = 0
+    private var lastKnownImeBottomScreenY: Int = 0
+
+    // Décalage éventuel du parent WindowManager (ex: statusBar / cutout), auto-calibré par getLocationOnScreen
+    private var parentScreenOffsetY: Int = 0
+    private var lastAppliedTargetScreenTopY: Int = -1
+
+    // États des 3 modes d'incrustation Gboard
     private var isNumericFieldFocused: Boolean = false
     private var isCollapsedMode: Boolean = false
     private var isQuickSelectorOpen: Boolean = false
     private var suppressImeReopenUntilMs: Long = 0L
+
+    // Suivi continu pendant les animations d'ouverture/fermeture de Gboard
+    private var burstFramesRemaining: Int = 0
+    private var isTrackingLoopScheduled: Boolean = false
 
     // Référence au dernier champ de texte éditable pour ré-ouvrir Gboard via ▴ Clavier et insérer le texte
     private var lastEditableNode: AccessibilityNodeInfo? = null
@@ -106,13 +120,29 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
         }
     }
 
+    private val frameTrackerRunnable = object : Runnable {
+        override fun run() {
+            isTrackingLoopScheduled = false
+            evaluateWindowsAndSyncOverlay()
+            if (burstFramesRemaining > 0 || isImeWindowVisible || isCollapsedMode || isQuickSelectorOpen) {
+                if (burstFramesRemaining > 0) burstFramesRemaining--
+                val delayMs = if (burstFramesRemaining > 0) 28L else 120L
+                isTrackingLoopScheduled = true
+                mainHandler.postDelayed(this, delayMs)
+            }
+        }
+    }
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         activeInstance = this
         windowManager = getSystemService(WINDOW_SERVICE) as? WindowManager
         engine = WhisperAndroidEngine.getInstance(applicationContext)
         downloader = ModelDownloader.getInstance(applicationContext)
-        lastKnownGboardHeightPx = dp(286)
+
+        val realScreenH = getRealScreenHeightPx()
+        lastKnownImeBottomScreenY = realScreenH
+        lastKnownImeTopScreenY = realScreenH - dp(310)
 
         engine.addListener(engineListener)
         downloader.onStateChanged = {
@@ -134,7 +164,7 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
         }
 
         buildOverlayViewHierarchy()
-        evaluateWindowsAndSyncOverlay()
+        triggerBurstTracking()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -145,7 +175,7 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
             AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
             AccessibilityEvent.TYPE_WINDOWS_CHANGED -> {
-                inspectFocusedNodeAndWindows()
+                triggerBurstTracking()
             }
             else -> {}
         }
@@ -155,11 +185,22 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         activeInstance = null
+        mainHandler.removeCallbacksAndMessages(null)
         if (::engine.isInitialized) {
             engine.removeListener(engineListener)
         }
         detachOverlayWindow()
         super.onDestroy()
+    }
+
+    private fun triggerBurstTracking() {
+        // Suit l'animation fluide de Gboard pendant ~600ms (22 frames à 28ms)
+        burstFramesRemaining = 22
+        evaluateWindowsAndSyncOverlay()
+        if (!isTrackingLoopScheduled) {
+            isTrackingLoopScheduled = true
+            mainHandler.postDelayed(frameTrackerRunnable, 28L)
+        }
     }
 
     private fun dp(value: Int): Int {
@@ -168,6 +209,18 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
             value.toFloat(),
             resources.displayMetrics
         ).roundToInt()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun getRealScreenHeightPx(): Int {
+        val wm = windowManager ?: return resources.displayMetrics.heightPixels
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            wm.currentWindowMetrics.bounds.height()
+        } else {
+            val pt = Point()
+            wm.defaultDisplay.getRealSize(pt)
+            pt.y
+        }
     }
 
     private fun performLightHaptic() {
@@ -183,16 +236,14 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
         }
     }
 
-    // MARK: - Inspection des Fenêtres Système (Hauteur exacte de Gboard via AccessibilityWindowInfo.TYPE_INPUT_METHOD)
-
-    private fun inspectFocusedNodeAndWindows() {
-        evaluateWindowsAndSyncOverlay()
-    }
+    // MARK: - Lecture Directe des Coordonnées Écran de Gboard (getBoundsInScreen)
 
     private fun evaluateWindowsAndSyncOverlay() {
-        val screenHeight = resources.displayMetrics.heightPixels
+        val realScreenHeight = getRealScreenHeightPx()
+        val minOpenKeyboardHeightPx = dp(175)
         var foundImeVisible = false
-        var measuredImeHeight = 0
+        var imeTopY = 0
+        var imeBottomY = realScreenHeight
 
         try {
             val winList = windows
@@ -201,10 +252,12 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
                 for (w in winList) {
                     if (w.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD) {
                         w.getBoundsInScreen(rect)
-                        val h = screenHeight - rect.top
-                        if (rect.height() > dp(64) && h > dp(64)) {
+                        // Sur Android 14/15, quand Gboard est fermé, sa région tactile résiduelle fait ~48dp (barre nav).
+                        // Quand Gboard est ouvert, rect.height() fait ~260dp à 380dp et rect.top est le bord supérieur exact de Gboard !
+                        if (rect.height() >= minOpenKeyboardHeightPx && rect.bottom > rect.top) {
                             foundImeVisible = true
-                            measuredImeHeight = h
+                            imeTopY = rect.top
+                            imeBottomY = max(rect.bottom, realScreenHeight)
                             break
                         }
                     }
@@ -235,16 +288,19 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
         val wasImeVisible = isImeWindowVisible
         isImeWindowVisible = foundImeVisible
 
-        if (foundImeVisible && measuredImeHeight > dp(120)) {
-            currentImeHeightPx = measuredImeHeight
-            lastKnownGboardHeightPx = measuredImeHeight
-            // Si Gboard vient de s'ouvrir après la période de rétractation, on sort du mode réduit
+        if (foundImeVisible) {
+            currentImeTopScreenY = imeTopY
+            currentImeBottomScreenY = imeBottomY
+            lastKnownImeTopScreenY = imeTopY
+            lastKnownImeBottomScreenY = imeBottomY
+
             if (!wasImeVisible && System.currentTimeMillis() > suppressImeReopenUntilMs) {
                 isCollapsedMode = false
                 engine.isKeyboardCollapsed = false
             }
         } else {
-            currentImeHeightPx = 0
+            currentImeTopScreenY = 0
+            currentImeBottomScreenY = realScreenHeight
         }
 
         updateOverlayVisibilityAndPosition()
@@ -264,8 +320,11 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
             detachOverlayWindow()
             return
         }
+        val justAttached = !isOverlayAttached
         attachOverlayWindowIfNeeded()
-        refreshOverlayContent()
+        if (justAttached) {
+            refreshOverlayContent()
+        }
         updateOverlayGeometry()
     }
 
@@ -658,7 +717,6 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
 
     private fun handleLeftActionButtonClick() {
         if (isQuickSelectorOpen) {
-            // Si le panneau de réglages couvre Gboard, on revient aux touches Gboard
             isQuickSelectorOpen = false
             if (isCollapsedMode && !isImeWindowVisible) {
                 reopenGboardOnActiveField()
@@ -676,10 +734,10 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
             engine.isKeyboardCollapsed = true
             suppressImeReopenUntilMs = System.currentTimeMillis() + 650L
             performGlobalAction(GLOBAL_ACTION_BACK)
-            currentImeHeightPx = 0
             isImeWindowVisible = false
             refreshOverlayContent()
             updateOverlayGeometry()
+            triggerBurstTracking()
         } else {
             // État 3 -> État 1 : Ré-ouvre Gboard sous la barre vocale WhisperOrb !
             reopenGboardOnActiveField()
@@ -700,11 +758,10 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
         }
         refreshOverlayContent()
         updateOverlayGeometry()
-        mainHandler.postDelayed({ evaluateWindowsAndSyncOverlay() }, 180L)
-        mainHandler.postDelayed({ evaluateWindowsAndSyncOverlay() }, 420L)
+        triggerBurstTracking()
     }
 
-    // MARK: - Mise à jour du contenu visuel et de la géométrie de la fenêtre
+    // MARK: - Mise à jour du contenu visuel
 
     private fun refreshOverlayContent() {
         val state = engine.orbState
@@ -715,7 +772,6 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
             orbState = state
         }
 
-        // Bouton gauche selon l'état (État 1: ▾ Réduire | État 2: ⌨️ Gboard | État 3: ▴ Clavier)
         collapseExpandBtn?.apply {
             when {
                 isQuickSelectorOpen -> {
@@ -745,7 +801,6 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
             }
         }
 
-        // Point de statut + Texte central
         val dotColor = when (state) {
             WhisperOrbState.IDLE -> Color.parseColor("#34C759")
             WhisperOrbState.LISTENING -> Color.parseColor("#FF3B30")
@@ -784,7 +839,6 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
     }
 
     private fun populateQuickSelectorRows() {
-        // 1. Langues
         val lRow = quickLangRow ?: return
         lRow.removeAllViews()
         for (lang in WhisperLanguageSelection.entries) {
@@ -817,7 +871,6 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
             )
         }
 
-        // 2. Modèles Whisper IA
         val mRow = quickModelRow ?: return
         mRow.removeAllViews()
         val unlocked = HardwareDetector.unlockedTiers(
@@ -895,11 +948,9 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
             )
         }
 
-        // 3. Couleurs de l'Orbe (Éclipse, Perle + 16 Foregrounds + 5 Backgrounds)
         val cRow = quickColorRow ?: return
         cRow.removeAllViews()
 
-        // Bouton spécial Éclipse (Noir sur Noir)
         val isEclipse = ThemeColors.isBlackOnBlack(engine.bgHex, engine.fgHex)
         cRow.addView(
             makeQuickColorChip(
@@ -913,7 +964,6 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
             }
         )
 
-        // Bouton spécial Perle (Blanc sur Blanc)
         val isPearl = ThemeColors.isWhiteOnWhite(engine.bgHex, engine.fgHex)
         cRow.addView(
             makeQuickColorChip(
@@ -1005,30 +1055,83 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
         return chip
     }
 
+    // MARK: - Géométrie Pixel-Perfect verrouillée sur getBoundsInScreen(Gboard).top et getLocationOnScreen()
+
+    private fun computeDesiredScreenTopAndHeight(): Pair<Int, Int> {
+        val barHeight = dp(58)
+        val realScreenH = getRealScreenHeightPx()
+        val navBarPadding = dp(24)
+
+        val activeGboardTopY = if (isImeWindowVisible && currentImeTopScreenY > dp(100)) {
+            currentImeTopScreenY
+        } else if (lastKnownImeTopScreenY > dp(100)) {
+            lastKnownImeTopScreenY
+        } else {
+            realScreenH - dp(310)
+        }
+
+        val activeGboardBottomY = if (isImeWindowVisible && currentImeBottomScreenY > activeGboardTopY) {
+            currentImeBottomScreenY
+        } else {
+            realScreenH
+        }
+
+        return when {
+            isQuickSelectorOpen -> {
+                // ÉTAT 2 : Le haut de la barre reste exactement au-dessus de Gboard (activeGboardTopY - barHeight)
+                // et le panneau descend jusqu'en bas de Gboard (activeGboardBottomY), couvrant 100 % des touches !
+                val topY = max(dp(48), activeGboardTopY - barHeight)
+                val totalH = max(dp(260), activeGboardBottomY - topY)
+                topY to totalH
+            }
+            isImeWindowVisible -> {
+                // ÉTAT 1 : Le bord inférieur de la barre (topY + barHeight) est verrouillé au pixel près sur activeGboardTopY !
+                val topY = max(dp(48), activeGboardTopY - barHeight)
+                topY to barHeight
+            }
+            else -> {
+                // ÉTAT 3 : Gboard rétracté via ▾ Réduire -> barre posée tout en bas de l'écran !
+                val topY = realScreenH - navBarPadding - barHeight
+                topY to barHeight
+            }
+        }
+    }
+
     private fun attachOverlayWindowIfNeeded() {
         if (isOverlayAttached) return
         val wm = windowManager ?: return
         val root = rootOverlayContainer ?: return
 
-        val barHeight = dp(58)
+        val (targetTopScreenY, targetHeight) = computeDesiredScreenTopAndHeight()
+
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
-            barHeight,
+            targetHeight,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.BOTTOM or Gravity.START
+            gravity = Gravity.TOP or Gravity.START
             x = 0
-            y = if (isImeWindowVisible) currentImeHeightPx else 0
+            y = targetTopScreenY - parentScreenOffsetY
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                setFitInsetsTypes(0)
+            }
         }
 
         try {
             wm.addView(root, lp)
             overlayLayoutParams = lp
             isOverlayAttached = true
+            lastAppliedTargetScreenTopY = targetTopScreenY
+            calibrateScreenLocationOnPost()
         } catch (_: Exception) {
         }
     }
@@ -1039,30 +1142,47 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
         val root = rootOverlayContainer ?: return
         val lp = overlayLayoutParams ?: return
 
-        val barHeight = dp(58)
-        val effectiveGboardHeight = if (currentImeHeightPx > dp(120)) {
-            currentImeHeightPx
-        } else {
-            max(dp(260), lastKnownGboardHeightPx)
-        }
+        val (targetTopScreenY, targetHeight) = computeDesiredScreenTopAndHeight()
+        val desiredLpY = targetTopScreenY - parentScreenOffsetY
+        lastAppliedTargetScreenTopY = targetTopScreenY
 
-        if (isQuickSelectorOpen) {
-            // ÉTAT 2 : Le panneau WhisperOrb se déploie DANS la zone des touches de Gboard (y = 0, hauteur = Gboard + barre)
-            lp.y = 0
-            lp.height = effectiveGboardHeight + barHeight
-        } else if (isImeWindowVisible) {
-            // ÉTAT 1 : Bandeau supérieur collé juste au-dessus de Gboard (y = hauteur exacte de la fenêtre IME)
-            lp.y = currentImeHeightPx
-            lp.height = barHeight
-        } else {
-            // ÉTAT 3 : Clavier Gboard rétracté via ▾ Réduire -> barre compacte posée tout en bas de l'écran (y = 0)
-            lp.y = 0
-            lp.height = barHeight
+        if (lp.y != desiredLpY || lp.height != targetHeight) {
+            lp.y = desiredLpY
+            lp.height = targetHeight
+            try {
+                wm.updateViewLayout(root, lp)
+            } catch (_: Exception) {
+            }
         }
+        calibrateScreenLocationOnPost()
+    }
 
-        try {
-            wm.updateViewLayout(root, lp)
-        } catch (_: Exception) {
+    /**
+     * Auto-calibration par getLocationOnScreen() :
+     * Compare la coordonnée Y réelle sur l'écran physique de notre barre avec targetTopScreenY
+     * (toutes deux dans le référentiel global [0..ScreenHeight]) et corrige tout décalage de statusBar/cutout au pixel près.
+     */
+    private fun calibrateScreenLocationOnPost() {
+        val root = rootOverlayContainer ?: return
+        root.post {
+            if (!isOverlayAttached) return@post
+            val wm = windowManager ?: return@post
+            val lp = overlayLayoutParams ?: return@post
+            val loc = IntArray(2)
+            root.getLocationOnScreen(loc)
+            val actualScreenTopY = loc[1]
+            val targetTopY = lastAppliedTargetScreenTopY
+            if (targetTopY > 0 && actualScreenTopY > 0) {
+                val errorPx = actualScreenTopY - targetTopY
+                if (abs(errorPx) > 1) {
+                    parentScreenOffsetY += errorPx
+                    lp.y = targetTopY - parentScreenOffsetY
+                    try {
+                        wm.updateViewLayout(root, lp)
+                    } catch (_: Exception) {
+                    }
+                }
+            }
         }
     }
 
@@ -1128,7 +1248,6 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
                 return
             }
 
-            // Fallback universel par presse-papier + ACTION_PASTE (ex: WebViews / Chrome / Docs)
             val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
             cm?.setPrimaryClip(ClipData.newPlainText("WhisperOrb", textToInsert))
             node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
