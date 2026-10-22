@@ -598,6 +598,7 @@ public struct WhisperSharedStatePayload: Codable, Equatable {
     public var vadSilenceThresholdSeconds: Double
     public var isBackgroundEngineActive: Bool
     public var isKeyboardCollapsed: Bool?
+    public var isSmartAutocorrectEnabled: Bool?
     public var toggleRecordingRequestCount: Int?
     public var updatedAt: TimeInterval
 }
@@ -693,6 +694,10 @@ public final class AppGroupManager: ObservableObject {
 
     @Published public var isKeyboardCollapsed: Bool = false {
         didSet { if !isApplyingRemoteUpdate && oldValue != isKeyboardCollapsed { persistAndBroadcastState() } }
+    }
+
+    @Published public var isSmartAutocorrectEnabled: Bool = true {
+        didSet { if !isApplyingRemoteUpdate && oldValue != isSmartAutocorrectEnabled { persistAndBroadcastState() } }
     }
 
     public var onToggleRecordingRequested: (() -> Void)?
@@ -804,6 +809,7 @@ public final class AppGroupManager: ObservableObject {
             vadSilenceThresholdSeconds: vadSilenceThresholdSeconds,
             isBackgroundEngineActive: isBackgroundEngineActive,
             isKeyboardCollapsed: isKeyboardCollapsed,
+            isSmartAutocorrectEnabled: isSmartAutocorrectEnabled,
             toggleRecordingRequestCount: toggleRecordingRequestCount,
             updatedAt: now
         )
@@ -944,6 +950,9 @@ public final class AppGroupManager: ObservableObject {
             }
             if let remoteCollapsed = validPayload.isKeyboardCollapsed, self.isKeyboardCollapsed != remoteCollapsed {
                 self.isKeyboardCollapsed = remoteCollapsed
+            }
+            if let remoteAutocorrect = validPayload.isSmartAutocorrectEnabled, self.isSmartAutocorrectEnabled != remoteAutocorrect {
+                self.isSmartAutocorrectEnabled = remoteAutocorrect
             }
         }
 

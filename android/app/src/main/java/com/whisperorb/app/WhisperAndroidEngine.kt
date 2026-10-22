@@ -1,6 +1,8 @@
 package com.whisperorb.app
 
 import android.annotation.SuppressLint
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.media.AudioFormat
 import android.media.AudioRecord
@@ -89,6 +91,40 @@ class WhisperAndroidEngine private constructor(private val context: Context) {
         set(value) {
             prefs.edit().putFloat("vadSilenceThresholdSeconds", value).apply()
         }
+
+    var isKeyboardCollapsed: Boolean
+        get() = prefs.getBoolean("isKeyboardCollapsed", false)
+        set(value) {
+            prefs.edit().putBoolean("isKeyboardCollapsed", value).apply()
+            notifyListeners()
+        }
+
+    var isSmartAutocorrectEnabled: Boolean
+        get() = prefs.getBoolean("isSmartAutocorrectEnabled", true)
+        set(value) {
+            prefs.edit().putBoolean("isSmartAutocorrectEnabled", value).apply()
+            notifyListeners()
+        }
+
+    var recentEmojis: List<String>
+        get() {
+            val raw = prefs.getString("recentEmojis", null)
+            if (raw.isNullOrBlank()) {
+                return listOf("😂", "❤️", "🔥", "👍", "😭", "🙏", "✨", "😍", "🤣", "😎", "🥳", "🚀", "👀", "💯", "🫶", "🤔")
+            }
+            return raw.split("|").filter { it.isNotBlank() }
+        }
+        set(value) {
+            prefs.edit().putString("recentEmojis", value.take(32).joinToString("|")).apply()
+        }
+
+    fun recordUsedEmoji(emoji: String) {
+        val updated = mutableListOf(emoji)
+        for (e in recentEmojis) {
+            if (e != emoji) updated.add(e)
+        }
+        recentEmojis = updated.take(32)
+    }
 
     var orbState: WhisperOrbState = WhisperOrbState.IDLE
         private set
@@ -462,6 +498,13 @@ class WhisperAndroidEngine private constructor(private val context: Context) {
         val withSpace = if (autoSpaceAfterSentence && !processed.endsWith("\n")) "$processed " else processed
         lastInsertedSentenceLength = withSpace.length
         liveTestTranscript += withSpace
+
+        // Sur Googlebook 14 / Chromebook / Clavier physique attaché, copie aussi dans le presse-papier (Ctrl+V prêt)
+        if (HardwareDetector.isChromebookOrGooglebook(context) || HardwareDetector.isHardwareKeyboardAttached(context)) {
+            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            cm?.setPrimaryClip(ClipData.newPlainText("WhisperOrb", withSpace))
+        }
+
         onTranscribedTextForKeyboard?.invoke(withSpace)
         statusBannerMessage = "Transcrit en $latencyMs ms • Inséré au clavier"
         notifyListeners()

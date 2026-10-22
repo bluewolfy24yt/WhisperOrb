@@ -2,6 +2,7 @@ package com.whisperorb.app
 
 import android.app.ActivityManager
 import android.content.Context
+import android.content.res.Configuration
 import android.os.Build
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -250,6 +251,47 @@ object HardwareDetector {
         }
     }
 
+    fun isChromebookOrGooglebook(context: Context): Boolean {
+        val pm = context.packageManager
+        if (pm.hasSystemFeature("org.chromium.arc") ||
+            pm.hasSystemFeature("org.chromium.arc.device_management") ||
+            pm.hasSystemFeature("android.hardware.type.pc")
+        ) {
+            return true
+        }
+        val model = (Build.MODEL ?: "").lowercase(Locale.ROOT)
+        val device = (Build.DEVICE ?: "").lowercase(Locale.ROOT)
+        val product = (Build.PRODUCT ?: "").lowercase(Locale.ROOT)
+        val board = (Build.BOARD ?: "").lowercase(Locale.ROOT)
+        val chromeKeywords = listOf(
+            "googlebook", "chromebook", "chromeos", "brya", "rex", "nissa",
+            "corsola", "dedede", "octopus", "hatch", "rammus", "volteer", "guybrush", "skyrim"
+        )
+        return chromeKeywords.any { kw ->
+            model.contains(kw) || device.contains(kw) || product.contains(kw) || board.contains(kw)
+        }
+    }
+
+    fun isTabletOrLargeScreen(context: Context): Boolean {
+        if (isChromebookOrGooglebook(context)) return true
+        val cfg = context.resources.configuration
+        return cfg.smallestScreenWidthDp >= 600 || cfg.screenWidthDp >= 680
+    }
+
+    fun isHardwareKeyboardAttached(context: Context): Boolean {
+        val cfg = context.resources.configuration
+        return cfg.keyboard == Configuration.KEYBOARD_QWERTY &&
+            cfg.hardKeyboardHidden == Configuration.HARDKEYBOARDHIDDEN_NO
+    }
+
+    fun getFormFactorBadge(context: Context): String {
+        return when {
+            isChromebookOrGooglebook(context) -> "💻 Googlebook / Chromebook OS"
+            isTabletOrLargeScreen(context) -> "📟 Tablette Android Grand Écran"
+            else -> "📱 Smartphone Android"
+        }
+    }
+
     fun getSocMarketingName(): String {
         val rawSoc = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             Build.SOC_MODEL.takeIf { it.isNotBlank() && it != "unknown" } ?: Build.HARDWARE
@@ -257,6 +299,7 @@ object HardwareDetector {
             Build.HARDWARE
         }
         val model = Build.MODEL ?: ""
+        val abis = Build.SUPPORTED_ABIS.joinToString(",")
         return when {
             rawSoc.contains("Tensor G4", ignoreCase = true) || model.contains("Pixel 9", ignoreCase = true) ->
                 "Google Tensor G4"
@@ -264,6 +307,10 @@ object HardwareDetector {
                 "Google Tensor G3"
             rawSoc.contains("Tensor G2", ignoreCase = true) || model.contains("Pixel 7", ignoreCase = true) ->
                 "Google Tensor G2"
+            rawSoc.contains("X1E", ignoreCase = true) || rawSoc.contains("Snapdragon X", ignoreCase = true) ->
+                "Snapdragon X Elite (ARM64)"
+            abis.contains("x86_64") ->
+                "Intel Core Ultra / x86_64 AVX2"
             else -> rawSoc
         }
     }

@@ -175,6 +175,7 @@ public struct KeyboardLayoutView: View {
     public let onDeleteBackward: () -> Void
     public let onDeleteLastDictatedSentence: (Int) -> Void
     public let onAdvanceToNextKeyboard: () -> Void
+    public let contextBeforeCursorProvider: () -> String
 
     @State private var currentLayer: KeyboardLayer = .letters
     @State private var selectedEmojiCategory: AppleEmojiCategory = .smileys
@@ -182,6 +183,8 @@ public struct KeyboardLayoutView: View {
     @State private var lastShiftTapTime: Date = .distantPast
     @State private var lastSpaceTapTime: Date = .distantPast
     @State private var showQuickOrbPopover: Bool = false
+    @State private var localTypedContextBuffer: String = ""
+    @State private var currentSuggestionSet: AutocorrectSuggestionSet = .empty
 
     // État temps réel de la touche pressée (Loupe Apple + Appui long variantes/accents)
     @State private var pressedKeyID: String? = nil
@@ -286,12 +289,14 @@ public struct KeyboardLayoutView: View {
         onInsertText: @escaping (String) -> Void,
         onDeleteBackward: @escaping () -> Void,
         onDeleteLastDictatedSentence: @escaping (Int) -> Void,
-        onAdvanceToNextKeyboard: @escaping () -> Void
+        onAdvanceToNextKeyboard: @escaping () -> Void,
+        contextBeforeCursorProvider: @escaping () -> String = { "" }
     ) {
         self.onInsertText = onInsertText
         self.onDeleteBackward = onDeleteBackward
         self.onDeleteLastDictatedSentence = onDeleteLastDictatedSentence
         self.onAdvanceToNextKeyboard = onAdvanceToNextKeyboard
+        self.contextBeforeCursorProvider = contextBeforeCursorProvider
     }
 
     private var isIPad: Bool {
@@ -308,7 +313,7 @@ public struct KeyboardLayoutView: View {
                     .padding(.horizontal, isIPad ? 12 : 8)
                     .padding(.vertical, isIPad ? 8 : 6)
             } else {
-                VStack(spacing: isIPad ? 9 : 8) {
+                VStack(spacing: isIPad ? 7 : 6) {
                     topVoiceControlBar
 
                     if showQuickOrbPopover {
@@ -318,6 +323,8 @@ public struct KeyboardLayoutView: View {
                         appleEmojiKeyboardPanel
                             .transition(.opacity)
                     } else {
+                        predictiveAutocorrectBar
+
                         keyboardCharacterRow(keys: activeRow1Keys, rowOrder: 1)
                             .zIndex(pressedRowIndex == 1 ? 40 : 1)
 
@@ -335,6 +342,12 @@ public struct KeyboardLayoutView: View {
                 .padding(.top, isIPad ? 6 : 4)
                 .padding(.bottom, isIPad ? 6 : 3)
             }
+        }
+        .onAppear {
+            refreshAutocorrectSuggestions()
+        }
+        .onChange(of: appGroup.selectedLanguage) { _ in
+            refreshAutocorrectSuggestions()
         }
     }
 
@@ -773,6 +786,112 @@ public struct KeyboardLayoutView: View {
         }
     }
 
+    // MARK: - Barre Prédictive & Correcteur Automatique IA (3 Suggestions en Temps Réel)
+
+    private var predictiveAutocorrectBar: some View {
+        let s = currentSuggestionSet
+        let leftTitle = s.typedWord.isEmpty ? s.secondaryPrediction : "« \(s.typedWord) »"
+        let centerTitle = s.primaryCorrection
+        let rightTitle = s.typedWord.isEmpty ? s.tertiaryPrediction : s.secondaryPrediction
+        let highlightCenter = appGroup.isSmartAutocorrectEnabled && s.shouldAutoReplaceOnSpace
+
+        return HStack(spacing: 4) {
+            Button(action: {
+                triggerLightHaptic()
+                if s.typedWord.isEmpty {
+                    applySuggestionCandidate(s.secondaryPrediction, replaceCount: 0)
+                } else {
+                    // Garde littéralement le mot tapé sans correction
+                    onInsertText(" ")
+                    localTypedContextBuffer += " "
+                    refreshAutocorrectSuggestions()
+                }
+            }) {
+                Text(leftTitle)
+                    .font(.system(size: isIPad ? 14 : 13, weight: .regular))
+                    .foregroundColor(Color.white.opacity(0.86))
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: isIPad ? 32 : 28)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color(hex: "#262629"))
+                    )
+            }
+            .buttonStyle(.plain)
+
+            Button(action: {
+                triggerLightHaptic()
+                applySuggestionCandidate(centerTitle, replaceCount: s.typedWord.count)
+            }) {
+                Text(centerTitle)
+                    .font(.system(size: isIPad ? 14.5 : 13.5, weight: highlightCenter ? .semibold : .medium))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: isIPad ? 32 : 28)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(highlightCenter ? Color(hex: "#0A84FF").opacity(0.32) : Color(hex: "#2E2E32"))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .strokeBorder(highlightCenter ? Color(hex: "#0A84FF").opacity(0.75) : Color.clear, lineWidth: 1)
+                            )
+                    )
+            }
+            .buttonStyle(.plain)
+
+            Button(action: {
+                triggerLightHaptic()
+                applySuggestionCandidate(rightTitle, replaceCount: s.typedWord.count)
+            }) {
+                Text(rightTitle)
+                    .font(.system(size: isIPad ? 14 : 13, weight: .regular))
+                    .foregroundColor(Color.white.opacity(0.86))
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: isIPad ? 32 : 28)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color(hex: "#262629"))
+                    )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 1)
+    }
+
+    private func applySuggestionCandidate(_ candidate: String, replaceCount: Int) {
+        guard !candidate.isEmpty else { return }
+        if replaceCount > 0 {
+            for _ in 0..<replaceCount {
+                onDeleteBackward()
+            }
+            if localTypedContextBuffer.count >= replaceCount {
+                localTypedContextBuffer.removeLast(replaceCount)
+            } else {
+                localTypedContextBuffer = ""
+            }
+        }
+        let committed = candidate + " "
+        onInsertText(committed)
+        localTypedContextBuffer += committed
+        if shiftState == .uppercased {
+            shiftState = .lowercased
+        }
+        refreshAutocorrectSuggestions()
+    }
+
+    private func refreshAutocorrectSuggestions() {
+        let proxyContext = contextBeforeCursorProvider()
+        let activeContext = proxyContext.isEmpty ? localTypedContextBuffer : proxyContext
+        localTypedContextBuffer = activeContext
+        currentSuggestionSet = SmartAutocorrectEngine.shared.computeSuggestions(
+            contextBeforeCursor: activeContext,
+            languageCode: appGroup.selectedLanguage.effectiveStyleLanguageCode
+        )
+    }
+
     // MARK: - Panneau Rapide de Langue, Modèle & Couleur
 
     private var quickColorAndModelSelectorPanel: some View {
@@ -1147,6 +1266,8 @@ public struct KeyboardLayoutView: View {
         selectedVariantIndex = 0
 
         onInsertText(textToInsert)
+        localTypedContextBuffer += textToInsert
+        refreshAutocorrectSuggestions()
 
         if currentLayer == .letters && shiftState == .uppercased {
             shiftState = .lowercased
@@ -1297,15 +1418,28 @@ public struct KeyboardLayoutView: View {
     private func handleSpacebarTap() {
         triggerLightHaptic()
         let now = Date()
-        if now.timeIntervalSince(lastSpaceTapTime) < 0.30 {
+        if now.timeIntervalSince(lastSpaceTapTime) < 0.30 && currentSuggestionSet.typedWord.isEmpty {
             onDeleteBackward()
+            if !localTypedContextBuffer.isEmpty {
+                localTypedContextBuffer.removeLast()
+            }
             onInsertText(". ")
+            localTypedContextBuffer += ". "
             if shiftState == .lowercased {
                 shiftState = .uppercased
             }
             lastSpaceTapTime = .distantPast
+            refreshAutocorrectSuggestions()
         } else {
-            onInsertText(" ")
+            // Application automatique de la correction IA si activée (ex: "jarrive" -> "j'arrive ", "cest" -> "c'est ")
+            let s = currentSuggestionSet
+            if appGroup.isSmartAutocorrectEnabled && s.shouldAutoReplaceOnSpace && !s.typedWord.isEmpty {
+                applySuggestionCandidate(s.primaryCorrection, replaceCount: s.typedWord.count)
+            } else {
+                onInsertText(" ")
+                localTypedContextBuffer += " "
+                refreshAutocorrectSuggestions()
+            }
             lastSpaceTapTime = now
         }
     }
@@ -1314,10 +1448,18 @@ public struct KeyboardLayoutView: View {
         isHoldingBackspace = true
         triggerLightHaptic()
         onDeleteBackward()
+        if !localTypedContextBuffer.isEmpty {
+            localTypedContextBuffer.removeLast()
+        }
+        refreshAutocorrectSuggestions()
 
         backspaceRepeatTimer?.invalidate()
         let timer = Timer(timeInterval: 0.075, repeats: true) { _ in
             onDeleteBackward()
+            if !localTypedContextBuffer.isEmpty {
+                localTypedContextBuffer.removeLast()
+            }
+            refreshAutocorrectSuggestions()
         }
         RunLoop.main.add(timer, forMode: .common)
         backspaceRepeatTimer = timer

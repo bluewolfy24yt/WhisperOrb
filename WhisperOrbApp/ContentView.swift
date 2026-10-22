@@ -212,6 +212,15 @@ public struct ContentView: View {
                     }
                     .toggleStyle(SwitchToggleStyle(tint: Color(hex: "#0A84FF")))
                 }
+
+                HStack {
+                    Toggle(isOn: $appGroup.isSmartAutocorrectEnabled) {
+                        Text("Correcteur automatique IA & 3 prédictions au clavier")
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundColor(Color.white.opacity(0.85))
+                    }
+                    .toggleStyle(SwitchToggleStyle(tint: Color(hex: "#30D158")))
+                }
             }
 
             Button(action: {

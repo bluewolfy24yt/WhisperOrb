@@ -109,14 +109,25 @@ Java_com_whisperorb_app_WhisperNativeBridge_getCpuTopologySummary(JNIEnv* env, j
     }
 
     std::ostringstream oss;
+#if defined(__x86_64__)
     if (maxFreqKHz > 0) {
         double ghz = (double)maxFreqKHz / 1000000.0;
-        char buf[64];
+        char buf[96];
+        snprintf(buf, sizeof(buf), "%d cœurs Perf (max %.2f GHz) • x86_64 AVX2+FMA", perfThreads, ghz);
+        oss << buf;
+    } else {
+        oss << perfThreads << " cœurs Performance • x86_64 AVX2+FMA (Googlebook/Chromebook)";
+    }
+#else
+    if (maxFreqKHz > 0) {
+        double ghz = (double)maxFreqKHz / 1000000.0;
+        char buf[96];
         snprintf(buf, sizeof(buf), "%d cœurs Perf (max %.2f GHz) • ARMv9 FP16+DotProd", perfThreads, ghz);
         oss << buf;
     } else {
         oss << perfThreads << " cœurs Performance • ARM64 SIMD + FlashAttention";
     }
+#endif
     return env->NewStringUTF(oss.str().c_str());
 }
 

@@ -6,6 +6,11 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- Compatibilité universelle Smartphones, Tablettes Android, Chromebooks, Chromebook Plus & Googlebook 14 -->
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <uses-feature android:name="android.hardware.type.pc" android:required="false" />
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -18,26 +23,28 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:resizeableActivity="true"
             android:windowSoftInputMode="adjustResize"
-            android:configChanges="orientation|screenSize|keyboardHidden">
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
-        <!-- Service d'intégration de l'Orbe 3D sur le clavier Android par défaut (avec protection des pavés numériques) -->
+        <!-- Vrai Clavier Android Natif (InputMethodService) avec Orbe 3D incrusté, bouton ▾ Réduire,
+             Correcteur Automatique IA et basculement automatique en Clavier de Chiffres pur -->
         <service
-            android:name=".WhisperOrbAccessibilityService"
+            android:name=".WhisperOrbInputMethodService"
             android:exported="true"
-            android:label="@string/accessibility_service_label"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            android:label="@string/ime_service_label"
+            android:permission="android.permission.BIND_INPUT_METHOD">
             <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
+                <action android:name="android.view.InputMethod" />
             </intent-filter>
             <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/accessibility_service_config" />
+                android:name="android.view.im"
+                android:resource="@xml/method" />
         </service>
 
     </application>

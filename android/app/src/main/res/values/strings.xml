@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">WhisperOrb</string>
+    <string name="ime_service_label">WhisperOrb — Clavier IA &amp; Orbe 3D</string>
+    <string name="ime_subtype_multilingual">Multilingue (FR / Auto IA)</string>
+    <string name="ime_subtype_en">English (QWERTY / IA)</string>
     <string name="accessibility_service_label">WhisperOrb — Orbe sur Clavier par Défaut</string>
-    <string name="accessibility_service_description">Affiche l\'Orbe 3D WhisperOrb au-dessus de votre clavier Android par défaut (Gboard) lors de la saisie de texte, se masque automatiquement sur les claviers de chiffres, et insère la dictée hors-ligne directement au curseur.</string>
+    <string name="accessibility_service_description">Clavier IA hors-ligne WhisperOrb avec Orbe 3D intégré, mode réduit et protection automatique des claviers de chiffres.</string>
 </resources>

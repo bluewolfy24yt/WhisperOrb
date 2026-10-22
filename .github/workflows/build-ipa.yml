@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build-android:
-    name: Compile Android Native NDK APK (arm64-v8a)
+    name: Compile Android Native NDK APK (arm64-v8a + x86_64)
     runs-on: ubuntu-latest
     steps:
       - name: 1. Checkout Repository
@@ -57,17 +57,27 @@ jobs:
           tag_name: v2.0.0
           name: "WhisperOrb v2.0.0 — Apple (.ipa) & Android (.apk)"
           body: |
-            ## 🫧 WhisperOrb `v2.0.0` — 100% On-Device Offline AI Voice Dictation (Apple & Android)
+            ## 🫧 WhisperOrb `v2.0.0` — 100% On-Device Offline AI Voice Dictation & Native Keyboard (Apple & Android)
 
             ### 🇬🇧 Quick Download & Setup
-            - 🤖 **Android (`WhisperOrb-Android.apk`)**: Install on any Android 8.0+ (ARM64) device, download your preferred Whisper model (up to **Whisper TITAN Large-v3 1.08 GB** on 12 GB+ RAM phones like the **Pixel 9 Pro XL**), and enable the **WhisperOrb Accessibility Service** to dock the 120 Hz 3D Orb onto your default keyboard (auto-hides on numeric keypads).
-            - 🍎 **Apple iOS / iPadOS / macOS (`WhisperOrb-iPad.ipa`)**: Install via **SideStore**, **AltStore**, **Sideloadly**, or `isideload`, download a model, and enable the native WhisperOrb keyboard (now featuring the full 9-category Apple Emoji Picker, accents, and `user_style_memory.json`).
+            - 🤖 **Android, Tablets, Chromebook Plus & Googlebook 14 (`WhisperOrb-Android.apk` — `arm64-v8a` + `x86_64` AVX2)**:
+              1. Install `WhisperOrb-Android.apk` and open **WhisperOrb** (Cosmic Dark Pro UI with automatic 2-column layout on Android Tablets & Googlebook 14).
+              2. Download your preferred Whisper model (from **Whisper Nano 31 MB** up to **Whisper TITAN Large-v3 1.08 GB** on 12 GB+ RAM devices like the **Pixel 9 Pro XL** or **Googlebook 14**).
+              3. Enable and select the **WhisperOrb Native Keyboard (`InputMethodService`)** in 2 taps: features the **120 Hz 3D Orb literally embedded inside the keyboard**, the **`▾ Réduire` collapsible 58dp voice bar**, **Smart AI Autocorrect & 3-Suggestion Bar**, **Full 9-Category Emoji Picker**, and **automatic pure numeric keypad mode** on number/PIN fields!
+            - 🍎 **Apple iOS / iPadOS / macOS (`WhisperOrb-iPad.ipa`)**:
+              1. Install via **SideStore**, **AltStore**, **Sideloadly**, or `isideload`.
+              2. Download a model and enable the **WhisperOrb Keyboard** (featuring the embedded 3D Orb, `▾ Réduire` collapsible voice bar, **Smart AI Autocorrect & 3-Suggestion Bar**, full 9-category Apple Emoji Picker, accents, and `user_style_memory.json`).
 
             ---
 
             ### 🇫🇷 Téléchargement & Installation Rapide
-            - 🤖 **Android (`WhisperOrb-Android.apk`)** : Installez l'APK, téléchargez l'un des **7 modèles Whisper** (jusqu'à **Whisper TITAN Large-v3 1,08 Go**), et activez le service d'accessibilité pour greffer l'Orbe 3D sur votre clavier Android par défaut (avec protection automatique des claviers de chiffres).
-            - 🍎 **Apple iOS / iPadOS / macOS (`WhisperOrb-iPad.ipa`)** : Installez l'IPA via **SideStore**, **AltStore** ou **Sideloadly**, téléchargez un modèle et activez le clavier WhisperOrb complet (avec tous les émojis Apple, accents, multilingue intelligent et mémoire `user_style_memory.json`).
+            - 🤖 **Android, Tablettes, Chromebook Plus & Googlebook 14 (`WhisperOrb-Android.apk` — `arm64-v8a` + `x86_64` AVX2)** :
+              1. Installez `WhisperOrb-Android.apk` et ouvrez **WhisperOrb** (nouvelle interface **Cosmic Dark Pro** avec mode 2 colonnes automatique sur Tablettes Android & Googlebook 14).
+              2. Téléchargez l'un des **7 modèles Whisper** (de **Whisper Nano 31 Mo** jusqu'à **Whisper TITAN Large-v3 1,08 Go** sur les appareils 12 Go+ RAM comme le **Pixel 9 Pro XL** ou le **Googlebook 14**).
+              3. Activez en 2 touches le **Clavier Natif WhisperOrb (`InputMethodService`)** : **Orbe 3D littéralement incrusté dans le clavier**, bouton **`▾ Réduire`** (barre vocale compacte de 58dp), **Correcteur Automatique IA & Barre de 3 prédictions**, **9 catégories d'émojis**, et **basculement automatique en clavier de chiffres pur** (sans Orbe) sur les champs numériques !
+            - 🍎 **Apple iOS / iPadOS / macOS (`WhisperOrb-iPad.ipa`)** :
+              1. Installez l'IPA via **SideStore**, **AltStore** ou **Sideloadly**.
+              2. Téléchargez un modèle et activez le clavier WhisperOrb complet (avec l'Orbe 3D incrusté, le bouton `▾ Réduire`, le **Correcteur Automatique IA & Barre de 3 prédictions**, tous les émojis Apple, accents et mémoire `user_style_memory.json`).
           files: WhisperOrb-Android.apk
           draft: false
           prerelease: false

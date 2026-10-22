@@ -12,7 +12,7 @@ public final class KeyboardViewController: UIInputViewController {
         if AppGroupManager.shared.isKeyboardCollapsed {
             return isPad ? 68.0 : 62.0
         }
-        return isPad ? 298.0 : 256.0
+        return isPad ? 328.0 : 286.0
     }
 
     public override func viewDidLoad() {
@@ -55,6 +55,9 @@ public final class KeyboardViewController: UIInputViewController {
             },
             onAdvanceToNextKeyboard: { [weak self] in
                 self?.advanceToNextKeyboard()
+            },
+            contextBeforeCursorProvider: { [weak self] in
+                self?.textDocumentProxy.documentContextBeforeInput ?? ""
             }
         )
 
