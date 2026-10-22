@@ -31,10 +31,9 @@ public struct KeyboardLayoutView: View {
     @State private var isHoldingBackspace: Bool = false
     @State private var backspaceRepeatTimer: Timer? = nil
 
-    // MARK: - Définition Intégrale des Rangées du Clavier AZERTY Français (Zéro Touche Résumée)
+    // MARK: - Définition des Rangées du Clavier AZERTY Français (Design iOS 18 Dark Mode)
 
-    private let row0QuickNumberAndAccents: [String] = [
-        "1", "2", "3", "4", "5", "6", "7", "8", "9", "0",
+    private let row0QuickFrenchAccents: [String] = [
         "é", "è", "ê", "à", "ù", "ç", "œ", "'", "-"
     ]
 
@@ -47,7 +46,7 @@ public struct KeyboardLayoutView: View {
     ]
 
     private let row3LettersWXCV: [String] = [
-        "w", "x", "c", "v", "b", "n", ",", ".", "?", "!"
+        "w", "x", "c", "v", "b", "n", ",", "."
     ]
 
     private let row1Numbers: [String] = [
@@ -92,43 +91,49 @@ public struct KeyboardLayoutView: View {
 
     public var body: some View {
         ZStack(alignment: .top) {
-            // Fond sobre du clavier iPadOS / iOS Pro
+            // Fond natif iOS 18 Dark Mode (#1C1C1E -> #141416)
             LinearGradient(
                 colors: [
-                    Color(hex: "#14151B"),
-                    Color(hex: "#0D0E13")
+                    Color(hex: "#1C1C1E"),
+                    Color(hex: "#141416")
                 ],
                 startPoint: .top,
                 endPoint: .bottom
             )
             .ignoresSafeArea()
 
-            VStack(spacing: isIPad ? 7 : 5) {
-                // Barre Supérieure (État en direct, Actions Goodnotes, et GeminiBubbleView 120 Hz)
-                topVoiceControlBar
+            if appGroup.isKeyboardCollapsed {
+                collapsedVoiceBarView
+                    .padding(.horizontal, isIPad ? 12 : 8)
+                    .padding(.vertical, isIPad ? 8 : 6)
+            } else {
+                VStack(spacing: isIPad ? 7 : 5) {
+                    // Barre Supérieure (Bouton Réduire, État en direct, Actions Goodnotes, et Orbe 3D 120 Hz)
+                    topVoiceControlBar
 
-                if showQuickOrbPopover {
-                    quickColorAndModelSelectorPanel
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                } else {
-                    // Rangée 0 : Chiffres & Accents Français Indispensables
-                    row0FastAccentsBar
+                    if showQuickOrbPopover {
+                        quickColorAndModelSelectorPanel
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    } else {
+                        // Rangée 0 : Accents Français Spacieux (é è ê à ù ç œ ' -)
+                        row0FastAccentsBar
 
-                    // Rangée 1 : AZERTY / Chiffres / Symboles
-                    keyboardCharacterRow(keys: activeRow1Keys)
+                        // Rangée 1 : AZERTY / Chiffres / Symboles
+                        keyboardCharacterRow(keys: activeRow1Keys)
 
-                    // Rangée 2 : QSDFGHJKLM / Ponctuation / Symboles
-                    keyboardCharacterRow(keys: activeRow2Keys)
+                        // Rangée 2 : QSDFGHJKLM / Ponctuation / Symboles
+                        keyboardCharacterRow(keys: activeRow2Keys)
 
-                    // Rangée 3 : Maj ⇧ + WXCVBN, . ? ! + Suppr ⌫ (répétition continue)
-                    row3WithShiftAndBackspace
+                        // Rangée 3 : Maj ⇧ + WXCVBN , . + Suppr ⌫ (répétition continue)
+                        row3WithShiftAndBackspace
 
-                    // Rangée 4 : 123/ABC + Globe 🌐 + Espace ("français • WhisperOrb") + Retour ⏎
-                    row4BottomBar
+                        // Rangée 4 : 123/ABC + Globe 🌐 + Espace ("français • WhisperOrb") + Retour ⏎
+                        row4BottomBar
+                    }
                 }
+                .padding(.horizontal, isIPad ? 10 : 5)
+                .padding(.vertical, isIPad ? 7 : 4)
             }
-            .padding(.horizontal, isIPad ? 10 : 5)
-            .padding(.vertical, isIPad ? 8 : 5)
         }
     }
 
@@ -158,11 +163,50 @@ public struct KeyboardLayoutView: View {
         }
     }
 
-    // MARK: - Barre Supérieure (Top Bar : État + Actions Goodnotes + Bulle Gemini 120 FPS)
+    // MARK: - Mode Clavier Réduit (Barre Vocale Flottante Compacte 62 pt)
 
-    private var topVoiceControlBar: some View {
+    private var collapsedVoiceBarView: some View {
         HStack(spacing: isIPad ? 10 : 6) {
-            // Pastille d'état en direct (cliquable elle aussi pour lancer/arrêter l'écoute)
+            // Bouton pour ré-afficher le clavier complet AZERTY
+            Button(action: {
+                triggerLightHaptic()
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    appGroup.isKeyboardCollapsed = false
+                }
+            }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "keyboard.chevron.compact.up")
+                        .font(.system(size: isIPad ? 14 : 13, weight: .bold))
+                    Text("Clavier")
+                        .font(.system(size: isIPad ? 13 : 12, weight: .bold, design: .rounded))
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, isIPad ? 12 : 9)
+                .padding(.vertical, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color(hex: "#3A3A3C"))
+                        .shadow(color: Color.black.opacity(0.4), radius: 0.8, x: 0, y: 1)
+                )
+            }
+            .buttonStyle(.plain)
+
+            // Touche 🌐 Globe pour changer de clavier même en mode réduit
+            Button(action: {
+                triggerLightHaptic()
+                onAdvanceToNextKeyboard()
+            }) {
+                Text("🌐")
+                    .font(.system(size: isIPad ? 16 : 14))
+                    .frame(width: isIPad ? 38 : 34, height: isIPad ? 38 : 35)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color(hex: "#2C2C2E"))
+                    )
+            }
+            .buttonStyle(.plain)
+
+            // Pastille centrale d'état vocal (cliquable pour démarrer/arrêter la dictée)
             Button(action: {
                 let generator = UIImpactFeedbackGenerator(style: .medium)
                 generator.impactOccurred()
@@ -173,26 +217,26 @@ public struct KeyboardLayoutView: View {
                         .fill(statusIndicatorColor)
                         .frame(width: 8, height: 8)
 
-                    Text(liveStatusTitle)
-                        .font(.system(size: isIPad ? 12 : 11, weight: .bold, design: .rounded))
+                    Text(collapsedStatusTitle)
+                        .font(.system(size: isIPad ? 13 : 11, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
                         .lineLimit(1)
                 }
-                .padding(.horizontal, isIPad ? 11 : 8)
-                .padding(.vertical, 7)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 9)
                 .background(
                     Capsule()
-                        .fill(Color.white.opacity(0.08))
+                        .fill(Color(hex: "#2C2C2E"))
                         .overlay(
                             Capsule()
-                                .strokeBorder(statusIndicatorColor.opacity(0.45), lineWidth: 1)
+                                .strokeBorder(statusIndicatorColor.opacity(0.55), lineWidth: 1.1)
                         )
                 )
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
-            // Bouton rapide "↶ Effacer phrase"
+            // Bouton rapide "↶" (Effacer dernière phrase dictée)
             Button(action: {
                 triggerLightHaptic()
                 let length = appGroup.lastInsertedSentenceLength
@@ -203,62 +247,55 @@ public struct KeyboardLayoutView: View {
                     onDeleteBackward()
                 }
             }) {
-                Text("↶ Effacer phrase")
-                    .font(.system(size: isIPad ? 12 : 11, weight: .semibold, design: .rounded))
-                    .foregroundColor(Color(hex: "#FFCC00"))
-                    .padding(.horizontal, isIPad ? 11 : 8)
-                    .padding(.vertical, 7)
+                Text("↶")
+                    .font(.system(size: isIPad ? 16 : 15, weight: .bold))
+                    .foregroundColor(Color(hex: "#FFD60A"))
+                    .frame(width: isIPad ? 38 : 34, height: isIPad ? 38 : 35)
                     .background(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Color(hex: "#FF9500").opacity(0.16))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .strokeBorder(Color(hex: "#FF9500").opacity(0.35), lineWidth: 0.8)
-                            )
+                            .fill(Color(hex: "#2C2C2E"))
                     )
             }
             .buttonStyle(.plain)
 
-            // Bouton rapide "↵ À la ligne"
+            // Bouton rapide "↵" (À la ligne)
             Button(action: {
                 triggerLightHaptic()
                 onInsertText("\n")
-                if shiftState == .lowercased {
-                    shiftState = .uppercased
-                }
             }) {
-                Text("↵ À la ligne")
-                    .font(.system(size: isIPad ? 12 : 11, weight: .semibold, design: .rounded))
+                Text("↵")
+                    .font(.system(size: isIPad ? 16 : 15, weight: .bold))
                     .foregroundColor(.white)
-                    .padding(.horizontal, isIPad ? 11 : 8)
-                    .padding(.vertical, 7)
+                    .frame(width: isIPad ? 38 : 34, height: isIPad ? 38 : 35)
                     .background(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Color.white.opacity(0.10))
+                            .fill(Color(hex: "#0A84FF"))
                     )
             }
             .buttonStyle(.plain)
 
-            Spacer()
+            // Touche ⌫ Suppr avec maintien appuyé
+            Text("⌫")
+                .font(.system(size: isIPad ? 16 : 14, weight: .bold))
+                .foregroundColor(.white)
+                .frame(width: isIPad ? 38 : 34, height: isIPad ? 38 : 35)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(isHoldingBackspace ? Color(hex: "#48484A") : Color(hex: "#2C2C2E"))
+                )
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { _ in
+                            if !isHoldingBackspace {
+                                startBackspaceRepeat()
+                            }
+                        }
+                        .onEnded { _ in
+                            stopBackspaceRepeat()
+                        }
+                )
 
-            // Bouton d'accès direct au mini-sélecteur de modèle/couleur (sans bloquer le tap de l'orbe)
-            Button(action: {
-                let generator = UIImpactFeedbackGenerator(style: .light)
-                generator.impactOccurred()
-                withAnimation(.spring(response: 0.26, dampingFraction: 0.82)) {
-                    showQuickOrbPopover.toggle()
-                }
-            }) {
-                Text(showQuickOrbPopover ? "Fermer ✕" : "⚙️")
-                    .font(.system(size: isIPad ? 13 : 12, weight: .bold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, showQuickOrbPopover ? 10 : 8)
-                    .padding(.vertical, 6)
-                    .background(Capsule().fill(Color.white.opacity(0.14)))
-            }
-            .buttonStyle(.plain)
-
-            // La Bulle GeminiBubbleView (size: 46) animée à 120 FPS dans un vrai Button natif ultra-réactif
+            // L'Orbe 3D pur (sans rectangle gris) à 120 FPS
             Button(action: {
                 let generator = UIImpactFeedbackGenerator(style: .medium)
                 generator.impactOccurred()
@@ -269,28 +306,183 @@ public struct KeyboardLayoutView: View {
                     fgHex: appGroup.fgHex,
                     audioLevel: CGFloat(appGroup.currentAudioLevel),
                     state: appGroup.orbState,
-                    size: 46,
-                    showSideTab: true,
+                    size: isIPad ? 48 : 44,
+                    showSideTab: false,
                     onTap: nil
                 )
-                .padding(.leading, 8)
-                .padding(.vertical, 2)
-                .contentShape(Rectangle())
+                .contentShape(Circle())
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, 4)
+    }
+
+    // MARK: - Barre Supérieure du Clavier Déplié (Top Bar : Réduire + État + Actions + Orbe 3D)
+
+    private var topVoiceControlBar: some View {
+        HStack(spacing: isIPad ? 8 : 5) {
+            // Bouton "▾ Réduire" pour masquer les touches AZERTY et garder uniquement la barre vocale
+            Button(action: {
+                triggerLightHaptic()
+                showQuickOrbPopover = false
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    appGroup.isKeyboardCollapsed = true
+                }
+            }) {
+                HStack(spacing: 3) {
+                    Image(systemName: "keyboard.chevron.compact.down")
+                        .font(.system(size: isIPad ? 12 : 11, weight: .bold))
+                    Text(isIPad ? "Réduire" : "▾")
+                        .font(.system(size: isIPad ? 12 : 11, weight: .bold, design: .rounded))
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, isIPad ? 10 : 8)
+                .padding(.vertical, 7)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(Color(hex: "#2C2C2E"))
+                )
+            }
+            .buttonStyle(.plain)
+
+            // Pastille d'état en direct (cliquable elle aussi pour lancer/arrêter l'écoute)
+            Button(action: {
+                let generator = UIImpactFeedbackGenerator(style: .medium)
+                generator.impactOccurred()
+                appGroup.requestToggleRecordingFromKeyboard()
+            }) {
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(statusIndicatorColor)
+                        .frame(width: 7, height: 7)
+
+                    Text(liveStatusTitle)
+                        .font(.system(size: isIPad ? 12 : 11, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, isIPad ? 10 : 8)
+                .padding(.vertical, 7)
+                .background(
+                    Capsule()
+                        .fill(Color(hex: "#2C2C2E"))
+                        .overlay(
+                            Capsule()
+                                .strokeBorder(statusIndicatorColor.opacity(0.45), lineWidth: 1)
+                        )
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            // Bouton rapide "↶ Effacer"
+            Button(action: {
+                triggerLightHaptic()
+                let length = appGroup.lastInsertedSentenceLength
+                if length > 0 {
+                    onDeleteLastDictatedSentence(length)
+                    appGroup.lastInsertedSentenceLength = 0
+                } else {
+                    onDeleteBackward()
+                }
+            }) {
+                Text(isIPad ? "↶ Effacer phrase" : "↶ Effacer")
+                    .font(.system(size: isIPad ? 12 : 11, weight: .semibold, design: .rounded))
+                    .foregroundColor(Color(hex: "#FFD60A"))
+                    .padding(.horizontal, isIPad ? 10 : 8)
+                    .padding(.vertical, 7)
+                    .background(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .fill(Color(hex: "#2C2C2E"))
+                    )
+            }
+            .buttonStyle(.plain)
+
+            if isIPad {
+                // Bouton rapide "↵ À la ligne" sur iPad
+                Button(action: {
+                    triggerLightHaptic()
+                    onInsertText("\n")
+                    if shiftState == .lowercased {
+                        shiftState = .uppercased
+                    }
+                }) {
+                    Text("↵ À la ligne")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .fill(Color(hex: "#2C2C2E"))
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+
+            Spacer(minLength: 2)
+
+            // Bouton d'accès direct au mini-sélecteur de modèle/couleur
+            Button(action: {
+                let generator = UIImpactFeedbackGenerator(style: .light)
+                generator.impactOccurred()
+                withAnimation(.spring(response: 0.26, dampingFraction: 0.82)) {
+                    showQuickOrbPopover.toggle()
+                }
+            }) {
+                Text(showQuickOrbPopover ? "✕" : "⚙️")
+                    .font(.system(size: isIPad ? 13 : 12, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill(Color(hex: "#2C2C2E")))
+            }
+            .buttonStyle(.plain)
+
+            // L'Orbe 3D pur GeminiBubbleView (size: 42/46, showSideTab: false) à 120 FPS
+            Button(action: {
+                let generator = UIImpactFeedbackGenerator(style: .medium)
+                generator.impactOccurred()
+                appGroup.requestToggleRecordingFromKeyboard()
+            }) {
+                GeminiBubbleView(
+                    bgHex: appGroup.bgHex,
+                    fgHex: appGroup.fgHex,
+                    audioLevel: CGFloat(appGroup.currentAudioLevel),
+                    state: appGroup.orbState,
+                    size: isIPad ? 46 : 42,
+                    showSideTab: false,
+                    onTap: nil
+                )
+                .padding(.leading, 2)
+                .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 2)
+    }
+
+    private var collapsedStatusTitle: String {
+        if !appGroup.isBackgroundEngineActive && appGroup.orbState == .idle {
+            return "Activer micro dans l'app"
+        }
+        switch appGroup.orbState {
+        case .idle:
+            return "Touchez l'orbe • \(appGroup.selectedModel.shortBadgeName)"
+        case .listening:
+            return "Écoute en cours..."
+        case .transcribing:
+            return "Transcription..."
+        }
     }
 
     private var liveStatusTitle: String {
         if !appGroup.isBackgroundEngineActive && appGroup.orbState == .idle {
-            return "Ouvrez WhisperOrb pour activer le micro"
+            return isIPad ? "Ouvrez WhisperOrb pour activer le micro" : "Micro en veille"
         }
         switch appGroup.orbState {
         case .idle:
             return "Prêt • \(appGroup.selectedModel.shortBadgeName)"
         case .listening:
-            return "Écoute en cours..."
+            return "Écoute..."
         case .transcribing:
             return "Transcription..."
         }
@@ -425,22 +617,22 @@ public struct KeyboardLayoutView: View {
         )
     }
 
-    // MARK: - Rangée 0 : Barre Rapide Chiffres & Accents Français Indispensables
+    // MARK: - Rangée 0 : Barre d'Accents Français Confortable (Style iOS 18)
 
     private var row0FastAccentsBar: some View {
-        HStack(spacing: isIPad ? 5 : 3) {
-            ForEach(row0QuickNumberAndAccents, id: \.self) { token in
+        HStack(spacing: isIPad ? 6 : 4) {
+            ForEach(row0QuickFrenchAccents, id: \.self) { token in
                 Button(action: {
                     handleCharacterKeyTap(token)
                 }) {
                     Text(displayStringForKey(token))
-                        .font(.system(size: isIPad ? 15 : 13, weight: .semibold, design: .rounded))
+                        .font(.system(size: isIPad ? 16 : 15, weight: .medium, design: .rounded))
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
-                        .frame(height: isIPad ? 34 : 29)
+                        .frame(height: isIPad ? 32 : 28)
                         .background(
                             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .fill(Color(hex: "#232530"))
+                                .fill(Color(hex: "#2C2C2E"))
                                 .shadow(color: Color.black.opacity(0.35), radius: 0.5, x: 0, y: 1)
                         )
                 }
@@ -449,23 +641,23 @@ public struct KeyboardLayoutView: View {
         }
     }
 
-    // MARK: - Rangées 1 & 2 : Grille de Touches Standards
+    // MARK: - Rangées 1 & 2 : Grille de Touches Standards iOS 18 (#3A3A3C)
 
     private func keyboardCharacterRow(keys: [String]) -> some View {
-        HStack(spacing: isIPad ? 6 : 4) {
+        HStack(spacing: isIPad ? 7 : 5) {
             ForEach(keys, id: \.self) { key in
                 Button(action: {
                     handleCharacterKeyTap(key)
                 }) {
                     Text(displayStringForKey(key))
-                        .font(.system(size: isIPad ? 19 : 16, weight: .medium, design: .rounded))
+                        .font(.system(size: isIPad ? 20 : 18, weight: .regular))
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
-                        .frame(height: isIPad ? 44 : 38)
+                        .frame(height: isIPad ? 43 : 38)
                         .background(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(Color(hex: "#2C2E3B"))
-                                .shadow(color: Color.black.opacity(0.45), radius: 0.8, x: 0, y: 1.2)
+                            RoundedRectangle(cornerRadius: 8.5, style: .continuous)
+                                .fill(Color(hex: "#3A3A3C"))
+                                .shadow(color: Color.black.opacity(0.50), radius: 0.6, x: 0, y: 1.2)
                         )
                 }
                 .buttonStyle(.plain)
@@ -473,10 +665,10 @@ public struct KeyboardLayoutView: View {
         }
     }
 
-    // MARK: - Rangée 3 : Touche ⇧ Maj + W X C V B N , . ? ! + Touche ⌫ Suppr (Répétition Rapide)
+    // MARK: - Rangée 3 : Touche ⇧ Maj + W X C V B N , . + Touche ⌫ Suppr (Répétition Rapide)
 
     private var row3WithShiftAndBackspace: some View {
-        HStack(spacing: isIPad ? 6 : 4) {
+        HStack(spacing: isIPad ? 7 : 5) {
             // Touche Gauche : ⇧ Maj (ou #+= / 123 en mode chiffres/symboles)
             Button(action: {
                 triggerLightHaptic()
@@ -485,39 +677,39 @@ public struct KeyboardLayoutView: View {
                 Group {
                     if currentLayer == .letters {
                         Text(shiftState == .capsLocked ? "⇪" : "⇧")
-                            .font(.system(size: isIPad ? 20 : 17, weight: .bold))
+                            .font(.system(size: isIPad ? 20 : 18, weight: .bold))
                     } else if currentLayer == .numbers {
                         Text("#+=")
-                            .font(.system(size: isIPad ? 15 : 13, weight: .bold))
+                            .font(.system(size: isIPad ? 15 : 13, weight: .semibold))
                     } else {
                         Text("123")
-                            .font(.system(size: isIPad ? 15 : 13, weight: .bold))
+                            .font(.system(size: isIPad ? 15 : 13, weight: .semibold))
                     }
                 }
                 .foregroundColor(shiftKeyForegroundColor)
-                .frame(width: isIPad ? 64 : 42, height: isIPad ? 44 : 38)
+                .frame(width: isIPad ? 64 : 44, height: isIPad ? 43 : 38)
                 .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    RoundedRectangle(cornerRadius: 8.5, style: .continuous)
                         .fill(shiftKeyBackgroundColor)
-                        .shadow(color: Color.black.opacity(0.45), radius: 0.8, x: 0, y: 1.2)
+                        .shadow(color: Color.black.opacity(0.50), radius: 0.6, x: 0, y: 1.2)
                 )
             }
             .buttonStyle(.plain)
 
-            // Touches Centrales : W, X, C, V, B, N, ,, ., ?, !
+            // Touches Centrales : W, X, C, V, B, N, ,, .
             ForEach(activeRow3Keys, id: \.self) { key in
                 Button(action: {
                     handleCharacterKeyTap(key)
                 }) {
                     Text(displayStringForKey(key))
-                        .font(.system(size: isIPad ? 18 : 15, weight: .medium, design: .rounded))
+                        .font(.system(size: isIPad ? 19 : 18, weight: .regular))
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
-                        .frame(height: isIPad ? 44 : 38)
+                        .frame(height: isIPad ? 43 : 38)
                         .background(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(Color(hex: "#2C2E3B"))
-                                .shadow(color: Color.black.opacity(0.45), radius: 0.8, x: 0, y: 1.2)
+                            RoundedRectangle(cornerRadius: 8.5, style: .continuous)
+                                .fill(Color(hex: "#3A3A3C"))
+                                .shadow(color: Color.black.opacity(0.50), radius: 0.6, x: 0, y: 1.2)
                         )
                 }
                 .buttonStyle(.plain)
@@ -525,13 +717,13 @@ public struct KeyboardLayoutView: View {
 
             // Touche Droite : ⌫ Suppr avec répétition rapide automatique au maintien
             Text("⌫")
-                .font(.system(size: isIPad ? 20 : 17, weight: .bold))
+                .font(.system(size: isIPad ? 20 : 18, weight: .semibold))
                 .foregroundColor(.white)
-                .frame(width: isIPad ? 64 : 42, height: isIPad ? 44 : 38)
+                .frame(width: isIPad ? 64 : 44, height: isIPad ? 43 : 38)
                 .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(isHoldingBackspace ? Color(hex: "#4B4E63") : Color(hex: "#1E202B"))
-                        .shadow(color: Color.black.opacity(0.45), radius: 0.8, x: 0, y: 1.2)
+                    RoundedRectangle(cornerRadius: 8.5, style: .continuous)
+                        .fill(isHoldingBackspace ? Color(hex: "#545458") : Color(hex: "#2C2C2E"))
+                        .shadow(color: Color.black.opacity(0.50), radius: 0.6, x: 0, y: 1.2)
                 )
                 .gesture(
                     DragGesture(minimumDistance: 0)
@@ -561,12 +753,13 @@ public struct KeyboardLayoutView: View {
                 }
             }) {
                 Text(currentLayer == .letters ? "123" : "ABC")
-                    .font(.system(size: isIPad ? 16 : 14, weight: .bold, design: .rounded))
+                    .font(.system(size: isIPad ? 16 : 15, weight: .semibold))
                     .foregroundColor(.white)
-                    .frame(width: isIPad ? 76 : 50, height: isIPad ? 44 : 39)
+                    .frame(width: isIPad ? 76 : 48, height: isIPad ? 43 : 39)
                     .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color(hex: "#1E202B"))
+                        RoundedRectangle(cornerRadius: 8.5, style: .continuous)
+                            .fill(Color(hex: "#2C2C2E"))
+                            .shadow(color: Color.black.opacity(0.50), radius: 0.6, x: 0, y: 1.2)
                     )
             }
             .buttonStyle(.plain)
@@ -578,10 +771,11 @@ public struct KeyboardLayoutView: View {
             }) {
                 Text("🌐")
                     .font(.system(size: isIPad ? 19 : 16))
-                    .frame(width: isIPad ? 58 : 42, height: isIPad ? 44 : 39)
+                    .frame(width: isIPad ? 58 : 42, height: isIPad ? 43 : 39)
                     .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color(hex: "#1E202B"))
+                        RoundedRectangle(cornerRadius: 8.5, style: .continuous)
+                            .fill(Color(hex: "#2C2C2E"))
+                            .shadow(color: Color.black.opacity(0.50), radius: 0.6, x: 0, y: 1.2)
                     )
             }
             .buttonStyle(.plain)
@@ -592,20 +786,20 @@ public struct KeyboardLayoutView: View {
             }) {
                 HStack(spacing: 6) {
                     Text("français • WhisperOrb")
-                        .font(.system(size: isIPad ? 15 : 13, weight: .medium, design: .rounded))
-                        .foregroundColor(Color.white.opacity(0.82))
+                        .font(.system(size: isIPad ? 15 : 14, weight: .regular))
+                        .foregroundColor(Color.white.opacity(0.90))
                 }
                 .frame(maxWidth: .infinity)
-                .frame(height: isIPad ? 44 : 39)
+                .frame(height: isIPad ? 43 : 39)
                 .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color(hex: "#2C2E3B"))
-                        .shadow(color: Color.black.opacity(0.45), radius: 0.8, x: 0, y: 1.2)
+                    RoundedRectangle(cornerRadius: 8.5, style: .continuous)
+                        .fill(Color(hex: "#3A3A3C"))
+                        .shadow(color: Color.black.opacity(0.50), radius: 0.6, x: 0, y: 1.2)
                 )
             }
             .buttonStyle(.plain)
 
-            // Touche Retour ⏎ (Bleue, insère un saut de ligne \n)
+            // Touche Retour ⏎ (Bleue Apple #0A84FF, insère un saut de ligne \n)
             Button(action: {
                 triggerLightHaptic()
                 onInsertText("\n")
@@ -614,13 +808,13 @@ public struct KeyboardLayoutView: View {
                 }
             }) {
                 Text("Retour ⏎")
-                    .font(.system(size: isIPad ? 16 : 14, weight: .bold, design: .rounded))
+                    .font(.system(size: isIPad ? 16 : 15, weight: .semibold))
                     .foregroundColor(.white)
-                    .frame(width: isIPad ? 110 : 82, height: isIPad ? 44 : 39)
+                    .frame(width: isIPad ? 110 : 86, height: isIPad ? 43 : 39)
                     .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color(hex: "#0088FF"))
-                            .shadow(color: Color(hex: "#0088FF").opacity(0.35), radius: 2, x: 0, y: 1.5)
+                        RoundedRectangle(cornerRadius: 8.5, style: .continuous)
+                            .fill(Color(hex: "#0A84FF"))
+                            .shadow(color: Color.black.opacity(0.50), radius: 0.6, x: 0, y: 1.2)
                     )
             }
             .buttonStyle(.plain)
@@ -711,7 +905,7 @@ public struct KeyboardLayoutView: View {
         if currentLayer == .letters && (shiftState == .uppercased || shiftState == .capsLocked) {
             return Color.white
         }
-        return Color(hex: "#1E202B")
+        return Color(hex: "#2C2C2E")
     }
 
     private var shiftKeyForegroundColor: Color {

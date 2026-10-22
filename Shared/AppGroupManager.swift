@@ -102,7 +102,7 @@ public enum WhisperModelTier: String, CaseIterable, Codable, Identifiable {
     }
 }
 
-// MARK: - Détecteur Matériel Haute Précision (A12Z Bionic 6 Go / A15 Bionic 4 Go)
+// MARK: - Détecteur Matériel Universel Apple (Tous les iPhone & iPad — Puce Série A & Série M)
 
 public struct HardwareDetector {
     public static var physicalMemoryBytes: UInt64 {
@@ -131,50 +131,114 @@ public struct HardwareDetector {
     public static var deviceMarketingName: String {
         let code = machineIdentifier
         switch code {
-        // iPad Pro 12,9" (4e génération - 2020 - MXAT2NF/A - A12Z Bionic 6 Go)
+        // --- Gamme iPad Pro ---
         case "iPad8,11", "iPad8,12":
             return "iPad Pro 12,9\" (4e gén) — A12Z Bionic"
-        // iPad Pro 11" (2e génération - 2020 - A12Z Bionic 6 Go)
         case "iPad8,9", "iPad8,10":
             return "iPad Pro 11\" (2e gén) — A12Z Bionic"
-        // iPad Pro (3e gén 2018 - A12X Bionic)
         case "iPad8,1", "iPad8,2", "iPad8,3", "iPad8,4", "iPad8,5", "iPad8,6", "iPad8,7", "iPad8,8":
             return "iPad Pro (A12X Bionic)"
-        // iPad Pro M1 / M2 / M4
         case "iPad13,4", "iPad13,5", "iPad13,6", "iPad13,7", "iPad13,8", "iPad13,9", "iPad13,10", "iPad13,11":
             return "iPad Pro (Puce Apple M1)"
         case "iPad14,3", "iPad14,4", "iPad14,5", "iPad14,6":
             return "iPad Pro (Puce Apple M2)"
         case "iPad16,3", "iPad16,4", "iPad16,5", "iPad16,6":
             return "iPad Pro (Puce Apple M4)"
-        // iPhone 13 (Banc de test secondaire - A15 Bionic 4 Go)
-        case "iPhone14,5":
-            return "iPhone 13 — A15 Bionic"
+
+        // --- Gamme iPad Air ---
+        case "iPad11,3", "iPad11,4":
+            return "iPad Air (3e gén) — A12 Bionic"
+        case "iPad13,1", "iPad13,2":
+            return "iPad Air (4e gén) — A14 Bionic"
+        case "iPad13,16", "iPad13,17":
+            return "iPad Air (5e gén) — Puce Apple M1"
+        case "iPad14,8", "iPad14,9", "iPad14,10", "iPad14,11":
+            return "iPad Air — Puce Apple M2"
+        case "iPad15,3", "iPad15,4", "iPad15,5", "iPad15,6":
+            return "iPad Air — Puce Apple M3"
+
+        // --- Gamme iPad mini ---
+        case "iPad11,1", "iPad11,2":
+            return "iPad mini (5e gén) — A12 Bionic"
+        case "iPad14,1", "iPad14,2":
+            return "iPad mini (6e gén) — A15 Bionic"
+        case "iPad16,1", "iPad16,2":
+            return "iPad mini (7e gén) — A17 Pro"
+
+        // --- Gamme iPad Standard ---
+        case "iPad11,6", "iPad11,7":
+            return "iPad (8e gén) — A12 Bionic"
+        case "iPad12,1", "iPad12,2":
+            return "iPad (9e gén) — A13 Bionic"
+        case "iPad13,18", "iPad13,19":
+            return "iPad (10e gén) — A14 Bionic"
+        case "iPad15,7", "iPad15,8":
+            return "iPad (11e gén) — A16 Bionic"
+
+        // --- Gamme iPhone (XS / XR à iPhone 16 Pro Max) ---
+        case "iPhone11,2", "iPhone11,4", "iPhone11,6":
+            return "iPhone XS — A12 Bionic"
+        case "iPhone11,8":
+            return "iPhone XR — A12 Bionic"
+        case "iPhone12,1":
+            return "iPhone 11 — A13 Bionic"
+        case "iPhone12,3", "iPhone12,5":
+            return "iPhone 11 Pro — A13 Bionic"
+        case "iPhone12,8":
+            return "iPhone SE (2e gén) — A13 Bionic"
+        case "iPhone13,1":
+            return "iPhone 12 mini — A14 Bionic"
+        case "iPhone13,2":
+            return "iPhone 12 — A14 Bionic"
+        case "iPhone13,3", "iPhone13,4":
+            return "iPhone 12 Pro — A14 Bionic"
         case "iPhone14,4":
             return "iPhone 13 mini — A15 Bionic"
+        case "iPhone14,5":
+            return "iPhone 13 — A15 Bionic"
         case "iPhone14,2":
             return "iPhone 13 Pro — A15 Bionic"
         case "iPhone14,3":
             return "iPhone 13 Pro Max — A15 Bionic"
-        case "iPhone14,7", "iPhone14,8":
+        case "iPhone14,6":
+            return "iPhone SE (3e gén) — A15 Bionic"
+        case "iPhone14,7":
             return "iPhone 14 — A15 Bionic"
-        case "iPhone15,2", "iPhone15,3":
+        case "iPhone14,8":
+            return "iPhone 14 Plus — A15 Bionic"
+        case "iPhone15,2":
             return "iPhone 14 Pro — A16 Bionic"
-        case "iPhone15,4", "iPhone15,5":
+        case "iPhone15,3":
+            return "iPhone 14 Pro Max — A16 Bionic"
+        case "iPhone15,4":
             return "iPhone 15 — A16 Bionic"
-        case "iPhone16,1", "iPhone16,2":
+        case "iPhone15,5":
+            return "iPhone 15 Plus — A16 Bionic"
+        case "iPhone16,1":
             return "iPhone 15 Pro — A17 Pro"
+        case "iPhone16,2":
+            return "iPhone 15 Pro Max — A17 Pro"
+        case "iPhone17,3":
+            return "iPhone 16 — A18"
+        case "iPhone17,4":
+            return "iPhone 16 Plus — A18"
+        case "iPhone17,5":
+            return "iPhone 16e — A18"
+        case "iPhone17,1":
+            return "iPhone 16 Pro — A18 Pro"
+        case "iPhone17,2":
+            return "iPhone 16 Pro Max — A18 Pro"
         case "x86_64", "arm64":
             if UIDevice.current.userInterfaceIdiom == .pad {
-                return "iPad Pro 12,9\" (Simulateur / A12Z)"
+                return "iPad (Apple Silicon / Metal)"
             } else {
-                return "iPhone 13 (Simulateur / A15)"
+                return "iPhone (Apple Silicon / Metal)"
             }
         default:
             if code.hasPrefix("iPad") {
-                return "iPad (\(code))"
+                return "iPad (\(code) • Metal GPU)"
             } else if code.hasPrefix("iPhone") {
-                return "iPhone (\(code))"
+                return "iPhone (\(code) • Metal GPU)"
             }
             return "Appareil Apple (\(code))"
         }
@@ -217,6 +281,7 @@ public struct WhisperSharedStatePayload: Codable, Equatable {
     public var autoPunctuation: Bool
     public var vadSilenceThresholdSeconds: Double
     public var isBackgroundEngineActive: Bool
+    public var isKeyboardCollapsed: Bool?
     public var toggleRecordingRequestCount: Int?
     public var updatedAt: TimeInterval
 }
@@ -284,12 +349,16 @@ public final class AppGroupManager: ObservableObject {
         didSet { if !isApplyingRemoteUpdate && oldValue != autoPunctuation { persistAndBroadcastState() } }
     }
 
-    @Published public var vadSilenceThresholdSeconds: Double = 1.0 {
+    @Published public var vadSilenceThresholdSeconds: Double = 0.65 {
         didSet { if !isApplyingRemoteUpdate && oldValue != vadSilenceThresholdSeconds { persistAndBroadcastState() } }
     }
 
     @Published public var isBackgroundEngineActive: Bool = false {
         didSet { if !isApplyingRemoteUpdate && oldValue != isBackgroundEngineActive { persistAndBroadcastState() } }
+    }
+
+    @Published public var isKeyboardCollapsed: Bool = false {
+        didSet { if !isApplyingRemoteUpdate && oldValue != isKeyboardCollapsed { persistAndBroadcastState() } }
     }
 
     // Callback déclenché dans l'application principale quand le clavier touche la bulle
@@ -388,6 +457,7 @@ public final class AppGroupManager: ObservableObject {
             autoPunctuation: autoPunctuation,
             vadSilenceThresholdSeconds: vadSilenceThresholdSeconds,
             isBackgroundEngineActive: isBackgroundEngineActive,
+            isKeyboardCollapsed: isKeyboardCollapsed,
             toggleRecordingRequestCount: toggleRecordingRequestCount,
             updatedAt: now
         )
@@ -511,6 +581,9 @@ public final class AppGroupManager: ObservableObject {
             }
             if self.isBackgroundEngineActive != freshest.isBackgroundEngineActive {
                 self.isBackgroundEngineActive = freshest.isBackgroundEngineActive
+            }
+            if let remoteCollapsed = freshest.isKeyboardCollapsed, self.isKeyboardCollapsed != remoteCollapsed {
+                self.isKeyboardCollapsed = remoteCollapsed
             }
         }
 

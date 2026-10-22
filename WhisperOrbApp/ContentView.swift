@@ -14,7 +14,6 @@ public struct ContentView: View {
     @State private var colorSearchText: String = ""
     @State private var showCopiedToast: Bool = false
     @State private var showRepoCopiedToast: Bool = false
-    @State private var previewShowSideTab: Bool = true
 
     private let githubRepoURLString = "https://github.com/bluewolfy24yt/WhisperOrb"
     private let githubReleasesURLString = "https://github.com/bluewolfy24yt/WhisperOrb/releases/latest"
@@ -219,7 +218,7 @@ public struct ContentView: View {
                             audioLevel: CGFloat(appGroup.currentAudioLevel),
                             state: appGroup.orbState,
                             size: 130,
-                            showSideTab: previewShowSideTab,
+                            showSideTab: false,
                             onTap: {
                                 let generator = UIImpactFeedbackGenerator(style: .medium)
                                 generator.impactOccurred()
@@ -238,14 +237,14 @@ public struct ContentView: View {
                     }
                 }
 
-                // Option d'affichage de la languette latérale Gemini Live + Badges de mode optique
+                // Option Mode Clavier Réduit + Badges de mode optique
                 HStack {
-                    Toggle(isOn: $previewShowSideTab) {
-                        Text("Afficher la languette latérale d'accroche")
+                    Toggle(isOn: $appGroup.isKeyboardCollapsed) {
+                        Text("Mode Clavier Réduit (Barre vocale flottante 62 pt)")
                             .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(Color.white.opacity(0.75))
+                            .foregroundColor(Color.white.opacity(0.82))
                     }
-                    .toggleStyle(SwitchToggleStyle(tint: Color(hex: "#0088FF")))
+                    .toggleStyle(SwitchToggleStyle(tint: Color(hex: "#0A84FF")))
 
                     Spacer()
 
@@ -844,10 +843,10 @@ public struct ContentView: View {
                         .foregroundColor(Color(hex: "#32ADE6"))
                 }
 
-                Slider(value: $appGroup.vadSilenceThresholdSeconds, in: 0.5...2.5, step: 0.1)
+                Slider(value: $appGroup.vadSilenceThresholdSeconds, in: 0.45...2.5, step: 0.05)
                     .tint(Color(hex: "#0088FF"))
 
-                Text("En mode mains-libres, dès que vous faites une pause de \(String(format: "%.1f", appGroup.vadSilenceThresholdSeconds)) s, la phrase est transcrite et insérée dans Goodnotes.")
+                Text("En mode mains-libres, dès que vous faites une pause de \(String(format: "%.2f", appGroup.vadSilenceThresholdSeconds)) s, la phrase est transcrite sur le GPU Metal et insérée instantanément.")
                     .font(.system(size: 11))
                     .foregroundColor(Color.white.opacity(0.60))
             }
@@ -952,13 +951,13 @@ public struct ContentView: View {
 
             // Encadré récapitulatif en 3 étapes
             VStack(alignment: .leading, spacing: 8) {
-                Text("Activation rapide en 3 étapes sur l'iPad Pro :")
+                Text("Activation rapide en 3 étapes sur tout iPhone ou iPad :")
                     .font(.system(size: 13, weight: .bold))
                     .foregroundColor(.white)
 
-                setupStepRow(number: "1", text: "Téléchargez le modèle Whisper Expert (ou Whisper PRO) dans la Carte 2 ci-dessus.")
+                setupStepRow(number: "1", text: "Téléchargez le modèle recommandé pour votre appareil (Whisper PRO ou Whisper Expert) dans la Carte 2 ci-dessus.")
                 setupStepRow(number: "2", text: "Ouvrez Réglages > Général > Clavier > Claviers > Ajouter un clavier > WhisperOrb et activez « Autoriser l'accès complet ».")
-                setupStepRow(number: "3", text: "Activez le Moteur Audio en Tâche de Fond (Carte 1), passez en Mode Avion, puis ouvrez Goodnotes !")
+                setupStepRow(number: "3", text: "Activez le Moteur Audio en Tâche de Fond (Carte 1), passez en Mode Avion, puis dictez dans n'importe quelle application !")
             }
             .padding(12)
             .background(RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.35)))

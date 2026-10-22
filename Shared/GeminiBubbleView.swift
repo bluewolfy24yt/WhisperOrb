@@ -61,21 +61,17 @@ public struct GeminiBubbleView: View {
             let phase = timeline.date.timeIntervalSinceReferenceDate
             let effectiveLevel = computeEffectiveLevel(phase: phase)
 
-            ZStack(alignment: .leading) {
-                // Languette latérale gauche style Gemini Live (si activée)
-                if showSideTab {
-                    sideDockingTab
-                        .offset(x: -size * 0.28)
-                }
-
-                // Sphère principale 120 Hz
+            ZStack(alignment: .center) {
+                // Sphère principale 120 Hz pure (sans rectangle gris arrière)
                 orbSphere(phase: phase, effectiveLevel: effectiveLevel)
                     .frame(width: size, height: size)
                     .shadow(
-                        color: Color.black.opacity(isWhiteCrystal ? 0.22 : 0.58),
-                        radius: size * 0.14,
+                        color: state == .listening
+                            ? Color(hex: fgHex).opacity(0.42)
+                            : Color.black.opacity(isWhiteCrystal ? 0.22 : 0.55),
+                        radius: state == .listening ? size * 0.18 : size * 0.13,
                         x: 0,
-                        y: size * 0.06
+                        y: state == .listening ? 0 : size * 0.05
                     )
             }
         }

@@ -6,11 +6,6 @@ options:
   xcodeVersion: "16.0"
   generateEmptyDirectories: true
 
-packages:
-  SwiftWhisper:
-    url: https://github.com/exPHAT/SwiftWhisper.git
-    from: 1.2.0
-
 targets:
   WhisperOrbApp:
     type: application
@@ -32,10 +27,12 @@ targets:
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: YES
         SWIFT_VERSION: "5.0"
         ENABLE_BITCODE: NO
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks"
     dependencies:
       - target: WhisperKeyboard
         embed: true
-      - package: SwiftWhisper
+      - framework: Frameworks/whisper.xcframework
+        embed: true
 
   WhisperKeyboard:
     type: app-extension

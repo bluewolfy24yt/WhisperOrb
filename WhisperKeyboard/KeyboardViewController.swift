@@ -8,7 +8,11 @@ public final class KeyboardViewController: UIInputViewController {
     private var cancellables = Set<AnyCancellable>()
 
     private var desiredKeyboardHeight: CGFloat {
-        UIDevice.current.userInterfaceIdiom == .pad ? 320.0 : 275.0
+        let isPad = UIDevice.current.userInterfaceIdiom == .pad
+        if AppGroupManager.shared.isKeyboardCollapsed {
+            return isPad ? 68.0 : 62.0
+        }
+        return isPad ? 298.0 : 256.0
     }
 
     public override func viewDidLoad() {
@@ -74,13 +78,27 @@ public final class KeyboardViewController: UIInputViewController {
         ])
     }
 
-    private func updateKeyboardHeightConstraint() {
-        heightConstraint?.constant = desiredKeyboardHeight
+    private func updateKeyboardHeightConstraint(animated: Bool = false) {
+        let targetHeight = desiredKeyboardHeight
+        guard heightConstraint?.constant != targetHeight else { return }
+        heightConstraint?.constant = targetHeight
+        if animated {
+            UIView.animate(withDuration: 0.22, delay: 0, options: [.curveEaseInOut, .allowUserInteraction]) {
+                self.view.layoutIfNeeded()
+            }
+        }
     }
 
-    // MARK: - Synchronisation Temps Réel avec AppGroupManager (Insertion & Suppression Goodnotes)
+    // MARK: - Synchronisation Temps Réel avec AppGroupManager (Insertion, Suppression & Mode Réduit)
 
     private func bindAppGroupStreams() {
+        AppGroupManager.shared.$isKeyboardCollapsed
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.updateKeyboardHeightConstraint(animated: true)
+            }
+            .store(in: &cancellables)
+
         AppGroupManager.shared.$pendingTranscribedText
             .receive(on: DispatchQueue.main)
             .sink { [weak self] pending in

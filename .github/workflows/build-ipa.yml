@@ -22,14 +22,17 @@ jobs:
             brew install xcodegen
           fi
 
-      - name: 3. Generate Xcode Project via XcodeGen
-        run: xcodegen generate
-
-      - name: 4. Resolve Swift Package Dependencies
+      - name: 3. Download Official whisper.cpp Metal GPU XCFramework
         run: |
-          xcodebuild -resolvePackageDependencies \
-            -project WhisperOrb.xcodeproj \
-            -scheme WhisperOrbApp
+          mkdir -p Frameworks
+          curl -fL "https://github.com/ggml-org/whisper.cpp/releases/download/b5454/whisper-b5454-xcframework.zip" -o /tmp/whisper-xcf.zip
+          unzip -q -o /tmp/whisper-xcf.zip -d /tmp/
+          rm -rf Frameworks/whisper.xcframework
+          mv /tmp/build-apple/whisper.xcframework Frameworks/whisper.xcframework
+          plutil -replace MinimumOSVersion -string "16.0" Frameworks/whisper.xcframework/ios-arm64/whisper.framework/Info.plist
+
+      - name: 4. Generate Xcode Project via XcodeGen
+        run: xcodegen generate
 
       - name: 5. Build Release for iphoneos (Unsigned / Ad-Hoc)
         run: |
