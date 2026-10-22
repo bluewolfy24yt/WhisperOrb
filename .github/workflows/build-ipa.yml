@@ -51,11 +51,11 @@ jobs:
           path: WhisperOrb-Android.apk
           if-no-files-found: error
 
-      - name: 7. Publish Android APK to GitHub Release v2.1.0
+      - name: 7. Publish Android APK to GitHub Release v2.1.1
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.1.0
-          name: "WhisperOrb v2.1.0 — Parité 1:1 Apple (.ipa) & Android Gboard (.apk)"
+          tag_name: v2.1.1
+          name: "WhisperOrb v2.1.1 — Parité 1:1 Apple (.ipa) & Android Gboard (.apk)"
           body: |
             ## 🫧 WhisperOrb `v2.1.0` — Parité 1:1 Apple & Android + Incrustation Gboard 3-États + Easter Egg 7 Niveaux
 
@@ -133,11 +133,11 @@ jobs:
           path: WhisperOrb-iPad.ipa
           if-no-files-found: error
 
-      - name: 8. Publish Apple IPA to GitHub Release v2.1.0
+      - name: 8. Publish Apple IPA to GitHub Release v2.1.1
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.1.0
-          name: "WhisperOrb v2.1.0 — Parité 1:1 Apple (.ipa) & Android Gboard (.apk)"
+          tag_name: v2.1.1
+          name: "WhisperOrb v2.1.1 — Parité 1:1 Apple (.ipa) & Android Gboard (.apk)"
           files: WhisperOrb-iPad.ipa
           draft: false
           prerelease: false

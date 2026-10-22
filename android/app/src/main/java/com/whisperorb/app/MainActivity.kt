@@ -221,7 +221,7 @@ fun WhisperOrbContentView() {
         ) {
             SoberAppHeaderSection(
                 context = context,
-                isServiceActive = isGboardServiceActive
+                isServiceActive = isGboardServiceActive && engine.isGboardBarEnabled
             )
 
             if (isLargeScreen) {
@@ -611,6 +611,45 @@ private fun Card1VoiceStudioSection(
             }
         }
 
+        // Switch 0 : Activer / Désactiver la barre au-dessus du Gboard
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Afficher la barre WhisperOrb au-dessus du Gboard",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color.White.copy(alpha = 0.92f),
+                modifier = Modifier.weight(1f)
+            )
+            Switch(
+                checked = engine.isGboardBarEnabled && isServiceActive,
+                onCheckedChange = { enabled ->
+                    triggerHaptic(context)
+                    if (!isServiceActive) {
+                        engine.isGboardBarEnabled = true
+                        context.startActivity(
+                            Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                        )
+                    } else {
+                        engine.isGboardBarEnabled = enabled
+                        if (!enabled) {
+                            WhisperOrbAccessibilityService.forcePreviewOverlay = false
+                        }
+                        WhisperOrbAccessibilityService.requestRefresh()
+                    }
+                    onForceRefresh()
+                },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = AppleGreen
+                )
+            )
+        }
+
         // Switch 1 : Mode clavier réduit (Barre vocale seule)
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -660,38 +699,42 @@ private fun Card1VoiceStudioSection(
             )
         }
 
-        // Bouton principal d'activation / statut du bandeau Gboard en arrière-plan
+        // Bouton principal pour Activer / Désactiver la barre au-dessus du Gboard
+        val isBarCurrentlyActive = isServiceActive && engine.isGboardBarEnabled
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
-                .background(if (isServiceActive) Color(0xFF1C1C1E) else AppleBlue)
+                .background(if (isBarCurrentlyActive) Color(0xFF1C1C1E) else AppleBlue)
                 .border(
                     width = 1.dp,
-                    color = if (isServiceActive) AppleGreen.copy(alpha = 0.45f) else Color.Transparent,
+                    color = if (isBarCurrentlyActive) AppleGreen.copy(alpha = 0.55f) else Color.Transparent,
                     shape = RoundedCornerShape(12.dp)
                 )
                 .clickable {
                     triggerHaptic(context)
-                    if (isServiceActive) {
-                        WhisperOrbAccessibilityService.forcePreviewOverlay =
-                            !WhisperOrbAccessibilityService.forcePreviewOverlay
-                        WhisperOrbAccessibilityService.requestRefresh()
-                        onForceRefresh()
-                    } else {
+                    if (!isServiceActive) {
+                        engine.isGboardBarEnabled = true
                         context.startActivity(
                             Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
                                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             }
                         )
+                    } else {
+                        engine.isGboardBarEnabled = !engine.isGboardBarEnabled
+                        if (!engine.isGboardBarEnabled) {
+                            WhisperOrbAccessibilityService.forcePreviewOverlay = false
+                        }
+                        WhisperOrbAccessibilityService.requestRefresh()
                     }
+                    onForceRefresh()
                 }
                 .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                text = if (isServiceActive) "🎙️" else "⌨️",
+                text = if (isBarCurrentlyActive) "🎙️" else "⌨️",
                 fontSize = 18.sp
             )
             Column(
@@ -699,20 +742,20 @@ private fun Card1VoiceStudioSection(
                 verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 Text(
-                    text = if (isServiceActive) {
-                        "Moteur vocal actif sur Gboard (Incrustation 3-États)"
-                    } else {
-                        "Activer l'incrustation WhisperOrb sur votre clavier Gboard"
+                    text = when {
+                        !isServiceActive -> "Autoriser la barre WhisperOrb sur Gboard"
+                        engine.isGboardBarEnabled -> "Barre au-dessus du Gboard : ACTIVÉE (Désactiver)"
+                        else -> "Barre au-dessus du Gboard : DÉSACTIVÉE (Activer)"
                     },
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = Color.White
                 )
                 Text(
-                    text = if (isServiceActive) {
-                        engine.statusBannerMessage
-                    } else {
-                        "Touchez ici pour autoriser WhisperOrb dans Accessibilité → Services installés"
+                    text = when {
+                        !isServiceActive -> "Touchez ici pour autoriser WhisperOrb dans Accessibilité"
+                        engine.isGboardBarEnabled -> engine.statusBannerMessage
+                        else -> "Touchez pour réactiver le bandeau vocal au-dessus de votre Gboard"
                     },
                     fontSize = 11.sp,
                     color = Color.White.copy(alpha = 0.80f)

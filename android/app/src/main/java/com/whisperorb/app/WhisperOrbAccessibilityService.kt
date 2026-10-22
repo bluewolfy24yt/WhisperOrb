@@ -111,8 +111,11 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
 
     private val engineListener: () -> Unit = {
         mainHandler.post {
-            refreshOverlayContent()
-            updateOverlayGeometry()
+            updateOverlayVisibilityAndPosition()
+            if (isOverlayAttached) {
+                refreshOverlayContent()
+                updateOverlayGeometry()
+            }
         }
     }
 
@@ -303,6 +306,7 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
     }
 
     private fun shouldShowOverlay(): Boolean {
+        if (!engine.isGboardBarEnabled) return false
         if (isNumericFieldFocused) return false
         if (forcePreviewOverlay) return true
         if (isImeWindowVisible) return true

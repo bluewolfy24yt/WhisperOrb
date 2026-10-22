@@ -106,6 +106,13 @@ class WhisperAndroidEngine private constructor(private val context: Context) {
             notifyListeners()
         }
 
+    var isGboardBarEnabled: Boolean
+        get() = prefs.getBoolean("isGboardBarEnabled", true)
+        set(value) {
+            prefs.edit().putBoolean("isGboardBarEnabled", value).apply()
+            notifyListeners()
+        }
+
     var isSmartAutocorrectEnabled: Boolean
         get() = prefs.getBoolean("isSmartAutocorrectEnabled", true)
         set(value) {
