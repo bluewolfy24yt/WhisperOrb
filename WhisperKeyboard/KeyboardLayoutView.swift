@@ -5,12 +5,167 @@ public enum KeyboardLayer: Equatable {
     case letters
     case numbers
     case symbols
+    case emojis
 }
 
 public enum ShiftState: Equatable {
     case lowercased
     case uppercased
     case capsLocked
+}
+
+public enum AppleEmojiCategory: Int, CaseIterable, Identifiable {
+    case recents = 0
+    case smileys = 1
+    case animals = 2
+    case food = 3
+    case activities = 4
+    case travel = 5
+    case objects = 6
+    case symbols = 7
+    case flags = 8
+
+    public var id: Int { rawValue }
+
+    public var sfSymbolIcon: String {
+        switch self {
+        case .recents:    return "clock.fill"
+        case .smileys:    return "face.smiling.fill"
+        case .animals:    return "pawprint.fill"
+        case .food:       return "fork.knife"
+        case .activities: return "soccerball"
+        case .travel:     return "car.fill"
+        case .objects:    return "lightbulb.fill"
+        case .symbols:    return "heart.fill"
+        case .flags:      return "flag.fill"
+        }
+    }
+
+    public var title: String {
+        switch self {
+        case .recents:    return "RÉCENTS"
+        case .smileys:    return "SMILEYS & PERSONNES"
+        case .animals:    return "ANIMAUX & NATURE"
+        case .food:       return "NOURRITURE & BOISSONS"
+        case .activities: return "ACTIVITÉS"
+        case .travel:     return "VOYAGES & LIEUX"
+        case .objects:    return "OBJETS"
+        case .symbols:    return "SYMBOLES & CŒURS"
+        case .flags:      return "DRAPEAUX"
+        }
+    }
+
+    public var emojis: [String] {
+        switch self {
+        case .recents:
+            return []
+        case .smileys:
+            return [
+                "😀", "😃", "😄", "😁", "😆", "😅", "🤣", "😂", "🙂", "🙃", "🫠", "😉", "😊", "😇", "🥰", "😍",
+                "🤩", "😘", "😗", "☺️", "😚", "😙", "🥲", "😋", "😛", "😜", "🤪", "😝", "🤑", "🤗", "🤭", "🫢",
+                "🫣", "🤫", "🤔", "🫡", "🤐", "🤨", "😐", "😑", "😶", "🫥", "😏", "😒", "🙄", "😬", "😮‍💨", "🤥",
+                "😌", "😔", "😪", "🤤", "😴", "😷", "🤒", "🤕", "🤢", "🤮", "🤧", "🥵", "🥶", "🥴", "😵", "😵‍💫",
+                "🤯", "🤠", "🥳", "🥸", "😎", "🤓", "🧐", "😕", "🫤", "😟", "🙁", "☹️", "😮", "😯", "😲", "😳",
+                "🥺", "🥹", "😦", "😧", "😨", "😰", "😥", "😢", "😭", "😱", "😖", "😣", "😞", "😓", "😩", "😫",
+                "🥱", "😤", "😡", "😠", "🤬", "😈", "👿", "💀", "☠️", "💩", "🤡", "👹", "👺", "👻", "👽", "👾",
+                "🤖", "👋", "🤚", "🖐️", "✋", "🖖", "🫱", "🫲", "🫳", "🫴", "👌", "🤌", "🤏", "✌️", "🤞", "🫰",
+                "🤟", "🤘", "🤙", "👈", "👉", "👆", "🖕", "👇", "☝️", "🫵", "👍", "👎", "✊", "👊", "🤛", "🤜",
+                "👏", "🙌", "🫶", "👐", "🤲", "🤝", "🙏", "✍️", "💅", "🤳", "💪", "🦾", "🦵", "🦿", "🦶", "👂",
+                "👀", "👁️", "👅", "👄", "🫦", "👶", "👧", "🧒", "👦", "👩", "🧑", "👨", "👩‍🦱", "🧑‍🦱", "👨‍🦱", "👩‍🦰",
+                "👱‍♀️", "👱", "🧓", "👵", "👴", "🙇", "💁", "🙅", "🙆", "🙋", "🧏", "🤦", "🤷", "💃", "🕺", "🫂"
+            ]
+        case .animals:
+            return [
+                "🐶", "🐱", "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐻‍❄️", "🐨", "🐯", "🦁", "🐮", "🐷", "🐽", "🐸",
+                "🐵", "🙈", "🙉", "🙊", "🐒", "🐔", "🐧", "🐦", "🐤", "🐣", "🐥", "🦆", "🦅", "🦉", "🦇", "🐺",
+                "🐗", "🐴", "🦄", "🐝", "🪱", "🐛", "🦋", "🐌", "🐞", "🐜", "🪰", "🪲", "🪳", "🦟", "🦗", "🕷️",
+                "🦂", "🐢", "🐍", "🦎", "🦖", "🦕", "🐙", "🦑", "🦐", "🦞", "🦀", "🐡", "🐠", "🐟", "🐬", "🐳",
+                "🐋", "🦈", "🐊", "🐅", "🐆", "🦓", "🦍", "🦧", "🦣", "🐘", "🦛", "🦏", "🐪", "🐫", "🦒", "🦘",
+                "🦬", "🐃", "🐂", "🐄", "🐎", "🐖", "🐏", "🐑", "🦙", "🐐", "🦌", "🐕", "🐩", "🦮", "🐈", "🐈‍⬛",
+                "🐓", "🦃", "🦤", "🦚", "🦜", "🦢", "🦩", "🕊️", "🐇", "🦝", "🦨", "🦡", "🦫", "🦦", "🦥", "🐁",
+                "🌵", "🎄", "🌲", "🌳", "🌴", "🪵", "🌱", "🌿", "☘️", "🍀", "🎍", "🪴", "🎋", "🍃", "🍂", "🍁",
+                "🍄", "🐚", "🪸", "🌾", "💐", "🌷", "🌹", "🥀", "🪷", "🌺", "🌸", "🌼", "🌻", "🌞", "🌝", "🌛",
+                "🌜", "🌚", "🌕", "🌖", "🌗", "🌘", "🌑", "🌒", "🌓", "🌔", "🌙", "🌎", "🌍", "🌏", "🪐", "💫",
+                "⭐", "🌟", "✨", "⚡", "☄️", "💥", "🔥", "🌪️", "🌈", "☀️", "🌤️", "⛅", "🌥️", "☁️", "🌦️", "🌧️",
+                "⛈️", "🌩️", "🌨️", "❄️", "☃️", "⛄", "🌬️", "💨", "💧", "💦", "🫧", "☔", "☂️", "🌊", "🌫️"
+            ]
+        case .food:
+            return [
+                "🍏", "🍎", "🍐", "🍊", "🍋", "🍌", "🍉", "🍇", "🍓", "🫐", "🍈", "🍒", "🍑", "🥭", "🍍", "🥥",
+                "🥝", "🍅", "🍆", "🥑", "🥦", "🥬", "🥒", "🌶️", "🫑", "🌽", "🥕", "🫒", "🧄", "🧅", "🥔", "🍠",
+                "🥐", "🥯", "🍞", "🥖", "🥨", "🧀", "🥚", "🍳", "🧈", "🥞", "🧇", "🥓", "🥩", "🍗", "🍖", "🦴",
+                "🌭", "🍔", "🍟", "🍕", "🫓", "🥪", "🥙", "🧆", "🌮", "🌯", "🫔", "🥗", "🥘", "🫕", "🥫", "🍝",
+                "🍜", "🍲", "🍛", "🍣", "🍱", "🥟", "🦪", "🍤", "🍙", "🍚", "🍘", "🍥", "🥠", "🥮", "🍢", "🍡",
+                "🍧", "🍨", "🍦", "🥧", "🧁", "🍰", "🎂", "🍮", "🍭", "🍬", "🍫", "🍿", "🍩", "🍪", "🌰", "🥜",
+                "🫘", "🍯", "🥛", "🍼", "🫖", "☕", "🍵", "🧃", "🥤", "🧋", "🍶", "🍺", "🍻", "🥂", "🍷", "🥃",
+                "🍸", "🍹", "🧉", "🍾", "🧊", "🥄", "🍴", "🍽️", "🥣", "🥡", "🥢", "🧂"
+            ]
+        case .activities:
+            return [
+                "⚽", "🏀", "🏈", "⚾", "🥎", "🎾", "🏐", "🏉", "🥏", "🎱", "🪀", "🏓", "🏸", "🏒", "🏑", "🥍",
+                "🏏", "🪃", "🥅", "⛳", "🪁", "🏹", "🎣", "🤿", "🥊", "🥋", "🎽", "🛹", "🛼", "🛷", "⛸️", "🥌",
+                "🎿", "⛷️", "🏂", "🪂", "🏋️", "🤼", "🤸", "⛹️", "🤺", "🤾", "🏌️", "🏇", "🧘", "🏄", "🏊", "🤽",
+                "🚣", "🧗", "🚵", "🚴", "🏆", "🥇", "🥈", "🥉", "🏅", "🎖️", "🏵️", "🎗️", "🎫", "🎟️", "🎪", "🤹",
+                "🎭", "🩰", "🎨", "🎬", "🎤", "🎧", "🎼", "🎹", "🥁", "🪘", "🎷", "🎺", "🪗", "🎸", "🪕", "🎻",
+                "🎲", "♟️", "🎯", "🎳", "🎮", "🎰", "🧩", "🎉", "🎊", "🎈", "🎂", "🎀", "🎁", "🎆", "🎇", "🧨",
+                "✨", "🎃", "🎄", "🎋", "🎍", "🎎", "🎏", "🎐", "🎑", "🧧", "🪩"
+            ]
+        case .travel:
+            return [
+                "🚗", "🚕", "🚙", "🚌", "🚎", "🏎️", "🚓", "🚑", "🚒", "🚐", "🛻", "🚚", "🚛", "🚜", "🦯", "🦽",
+                "🦼", "🛴", "🚲", "🛵", "🏍️", "🛺", "🚨", "🚔", "🚍", "🚘", "🚖", "🛞", "🚡", "🚠", "🚟", "🚃",
+                "🚋", "🚞", "🚝", "🚄", "🚅", "🚈", "🚂", "🚆", "🚇", "🚊", "🚉", "✈️", "🛫", "🛬", "🛩️", "💺",
+                "🛰️", "🚀", "🛸", "🚁", "🛶", "⛵", "🚤", "🛥️", "🛳️", "⛴️", "🚢", "⚓", "🛟", "⛽", "🚧", "🚦",
+                "🚥", "🚏", "🗺️", "🗿", "🗽", "🗼", "🏰", "🏯", "🏟️", "🎡", "🎢", "🎠", "⛲", "⛱️", "🏖️", "🏝️",
+                "🏜️", "🌋", "⛰️", "🏔️", "🗻", "🏕️", "⛺", "🛖", "🏠", "🏡", "🏘️", "🏚️", "🏗️", "🏭", "🏢", "🏬",
+                "🏣", "🏤", "🏥", "🏦", "🏨", "🏪", "🏫", "🏩", "💒", "🏛️", "⛪", "🕌", "🕍", "🛕", "🕋", "⛩️",
+                "🛤️", "🛣️", "🗾", "🎑", "🏞️", "🌅", "🌄", "🌠", "🎇", "🎆", "🌇", "🌆", "🏙️", "🌃", "🌌", "🌉"
+            ]
+        case .objects:
+            return [
+                "⌚", "📱", "📲", "💻", "⌨️", "🖥️", "🖨️", "🖱️", "🖲️", "🕹️", "🗜️", "💽", "💾", "💿", "📀", "📼",
+                "📷", "📸", "📹", "🎥", "📽️", "🎞️", "📞", "☎️", "📟", "📠", "📺", "📻", "🎙️", "🎚️", "🎛️", "🧭",
+                "⏱️", "⏲️", "⏰", "🕰️", "⌛", "⏳", "📡", "🔋", "🪫", "🔌", "💡", "🔦", "🕯️", "🪔", "🧯", "🛢️",
+                "💸", "💵", "💴", "💶", "💷", "🪙", "💰", "💳", "💎", "⚖️", "🪜", "🧰", "🪛", "🔧", "🔨", "⚒️",
+                "🛠️", "⛏️", "🪚", "🔩", "⚙️", "🪤", "🧱", "⛓️", "🧲", "🔫", "💣", "🧨", "🪓", "🔪", "🗡️", "⚔️",
+                "🛡️", "🚬", "⚰️", "🪦", "⚱️", "🏺", "🔮", "📿", "🧿", "🪬", "💈", "⚗️", "🔭", "🔬", "🕳️", "🩹",
+                "🩺", "💊", "💉", "🩸", "🧬", "🦠", "🧫", "🧪", "🌡️", "🧹", "🪠", "🧺", "🧻", "🚽", "🚰", "🚿",
+                "🛁", "🛀", "🧼", "🪥", "🪒", "🧽", "🪣", "🧴", "🛎️", "🔑", "🗝️", "🚪", "🪑", "🛋️", "🛏️", "🛌",
+                "🧸", "🪆", "🖼️", "🪞", "🪟", "🛍️", "🛒", "🎁", "🎈", "🎏", "🎀", "🪄", "🪅", "🎊", "🎉", "✉️",
+                "📩", "📨", "📧", "💌", "📥", "📤", "📦", "🏷️", "🪧", "📪", "📫", "📬", "📭", "📮", "📯", "📜",
+                "📃", "📄", "📑", "🧾", "📊", "📈", "📉", "🗒️", "🗓️", "📆", "📅", "🗑️", "📇", "🗃️", "🗳️", "🗄️",
+                "📋", "📁", "📂", "🗂️", "🗞️", "📰", "📓", "📔", "📒", "📕", "📗", "📘", "📙", "📚", "📖", "🔖",
+                "🧷", "🔗", "📎", "🖇️", "📐", "📏", "🧮", "📌", "📍", "✂️", "🖊️", "🖋️", "✒️", "🖌️", "🖍️", "📝",
+                "✏️", "🔍", "🔎", "🔏", "🔐", "🔒", "🔓", "👑", "👒", "🎩", "🎓", "🧢", "🪖", "⛑️", "💄", "💍"
+            ]
+        case .symbols:
+            return [
+                "❤️", "🩷", "🧡", "💛", "💚", "💙", "🩵", "💜", "🖤", "🩶", "🤍", "🤎", "💔", "❤️‍🔥", "❤️‍🩹", "❣️",
+                "💕", "💞", "💓", "💗", "💖", "💘", "💝", "💟", "☮️", "✝️", "☪️", "🕉️", "☸️", "✡️", "🔯", "🕎",
+                "☯️", "☦️", "🛐", "⛎", "♈", "♉", "♊", "♋", "♌", "♍", "♎", "♏", "♐", "♑", "♒", "♓",
+                "🆔", "⚛️", "🉑", "☢️", "☣️", "📴", "📳", "🈶", "🈚", "🈸", "🈺", "🈷️", "✴️", "🆚", "💮", "🉐",
+                "㊙️", "㊗️", "🈴", "🈵", "🈹", "🈲", "🅰️", "🅱️", "🆎", "🆑", "🅾️", "🆘", "❌", "⭕", "🛑", "⛔",
+                "📛", "🚫", "💯", "💢", "♨️", "🚷", "🚯", "🚳", "🚱", "🔞", "📵", "🚭", "❗", "❕", "❓", "❔",
+                "‼️", "⁉️", "🔅", "🔆", "〽️", "⚠️", "🚸", "🔱", "⚜️", "🔰", "♻️", "✅", "🈯", "💹", "❇️", "✳️",
+                "❎", "🌐", "💠", "Ⓜ️", "🌀", "💤", "🏧", "🚾", "♿", "🅿️", "🛗", "🈳", "🈂️", "🛂", "🛃", "🛄",
+                "🛅", "🚹", "🚺", "🚼", "⚧️", "🚻", "🚮", "🎦", "📶", "🈁", "🔣", "ℹ️", "🔤", "🔡", "🔠", "🆖",
+                "🆗", "🆙", "🆒", "🆕", "🆓", "0️⃣", "1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟",
+                "🔢", "#️⃣", "*️⃣", "⏏️", "▶️", "⏸️", "⏯️", "⏹️", "⏺️", "⏭️", "⏮️", "⏩", "⏪", "⏫", "⏬", "◀️",
+                "🔼", "🔽", "➡️", "⬅️", "⬆️", "⬇️", "↗️", "↘️", "↙️", "↖️", "↕️", "↔️", "↪️", "↩️", "⤴️", "⤵️",
+                "🔀", "🔁", "🔂", "🔄", "🔃", "🎵", "🎶", "➕", "➖", "➗", "✖️", "🟰", "♾️", "💲", "💱", "™️",
+                "©️", "®️", "〰️", "➰", "➿", "🔚", "🔙", "🔛", "🔝", "🔜", "✔️", "☑️", "🔘", "🔴", "🟠", "🟡",
+                "🟢", "🔵", "🟣", "⚫", "⚪", "🟤", "🔺", "🔻", "🔸", "🔹", "🔶", "🔷", "🔳", "🔲", "▪️", "▫️"
+            ]
+        case .flags:
+            return [
+                "🇫🇷", "🇬🇧", "🇺🇸", "🇨🇦", "🇧🇪", "🇨🇭", "🇪🇸", "🇩🇪", "🇮🇹", "🇵🇹", "🇳🇱", "🇱🇺", "🇲🇨", "🇮🇪", "🇦🇹", "🇬🇷",
+                "🇵🇱", "🇸🇪", "🇳🇴", "🇩🇰", "🇫🇮", "🇮🇸", "🇨🇿", "🇭🇺", "🇷🇴", "🇧🇬", "🇭🇷", "🇷🇸", "🇺🇦", "🇹🇷", "🇯🇵", "🇰🇷",
+                "🇨🇳", "🇹🇼", "🇭🇰", "🇸🇬", "🇮🇳", "🇦🇺", "🇳🇿", "🇧🇷", "🇲🇽", "🇦🇷", "🇨🇱", "🇨🇴", "🇵🇪", "🇲🇦", "🇩🇿", "🇹🇳",
+                "🇸🇳", "🇨🇮", "🇨🇲", "🇨🇩", "🇿🇦", "🇪🇬", "🇸🇦", "🇦🇪", "🇶🇦", "🇱🇧", "🇮🇱", "🇷🇺", "🏳️", "🏴", "🏁", "🚩",
+                "🏳️‍🌈", "🏳️‍⚧️", "🏴‍☠️", "🇪🇺", "🇺🇳"
+            ]
+        }
+    }
 }
 
 public struct KeyboardLayoutView: View {
@@ -22,6 +177,7 @@ public struct KeyboardLayoutView: View {
     public let onAdvanceToNextKeyboard: () -> Void
 
     @State private var currentLayer: KeyboardLayer = .letters
+    @State private var selectedEmojiCategory: AppleEmojiCategory = .smileys
     @State private var shiftState: ShiftState = .uppercased
     @State private var lastShiftTapTime: Date = .distantPast
     @State private var lastSpaceTapTime: Date = .distantPast
@@ -48,7 +204,6 @@ public struct KeyboardLayoutView: View {
         "q", "s", "d", "f", "g", "h", "j", "k", "l", "m"
     ]
 
-    // Rangée 3 : W X C V B N + apostrophe directe ' (appui long sur ' donne , . ? ! « »)
     private let row3LettersWXCV: [String] = [
         "w", "x", "c", "v", "b", "n", "'"
     ]
@@ -145,7 +300,6 @@ public struct KeyboardLayoutView: View {
 
     public var body: some View {
         ZStack(alignment: .top) {
-            // Fond exact du clavier sombre natif Apple iOS (#1C1C1E)
             Color(hex: "#1C1C1E")
                 .ignoresSafeArea()
 
@@ -155,26 +309,24 @@ public struct KeyboardLayoutView: View {
                     .padding(.vertical, isIPad ? 8 : 6)
             } else {
                 VStack(spacing: isIPad ? 9 : 8) {
-                    // Barre Supérieure Vocale (Réduire, État, Effacer, Réglages & Orbe 3D)
                     topVoiceControlBar
 
                     if showQuickOrbPopover {
                         quickColorAndModelSelectorPanel
                             .transition(.opacity)
+                    } else if currentLayer == .emojis {
+                        appleEmojiKeyboardPanel
+                            .transition(.opacity)
                     } else {
-                        // Rangée 1 : A Z E R T Y U I O P (zIndex supérieur pour que les bulles ne soient jamais masquées)
                         keyboardCharacterRow(keys: activeRow1Keys, rowOrder: 1)
                             .zIndex(pressedRowIndex == 1 ? 40 : 1)
 
-                        // Rangée 2 : Q S D F G H J K L M
                         keyboardCharacterRow(keys: activeRow2Keys, rowOrder: 2)
                             .zIndex(pressedRowIndex == 2 ? 40 : 2)
 
-                        // Rangée 3 : ⇧ Maj + W X C V B N ' + ⌫ Suppr
                         row3WithShiftAndBackspace
                             .zIndex(pressedRowIndex == 3 ? 40 : 3)
 
-                        // Rangée 4 : 123 + 🌐 + espace + retour
                         row4BottomBar
                             .zIndex(0)
                     }
@@ -198,7 +350,7 @@ public struct KeyboardLayoutView: View {
 
     private var activeRow1Keys: [String] {
         switch currentLayer {
-        case .letters: return row1LettersAZERTY
+        case .letters, .emojis: return row1LettersAZERTY
         case .numbers: return row1Numbers
         case .symbols: return row1Symbols
         }
@@ -206,7 +358,7 @@ public struct KeyboardLayoutView: View {
 
     private var activeRow2Keys: [String] {
         switch currentLayer {
-        case .letters: return row2LettersQSDF
+        case .letters, .emojis: return row2LettersQSDF
         case .numbers: return row2Numbers
         case .symbols: return row2Symbols
         }
@@ -214,9 +366,113 @@ public struct KeyboardLayoutView: View {
 
     private var activeRow3Keys: [String] {
         switch currentLayer {
-        case .letters: return row3LettersWXCV
+        case .letters, .emojis: return row3LettersWXCV
         case .numbers: return row3Numbers
         case .symbols: return row3Symbols
+        }
+    }
+
+    // MARK: - Clavier d'Émojis Apple Complet (9 Catégories + Récents + Retour ABC + Suppr)
+
+    private var activeEmojiList: [String] {
+        if selectedEmojiCategory == .recents {
+            return appGroup.recentEmojis
+        }
+        return selectedEmojiCategory.emojis
+    }
+
+    private var appleEmojiKeyboardPanel: some View {
+        VStack(spacing: 4) {
+            HStack {
+                Text(selectedEmojiCategory.title)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(Color.white.opacity(0.48))
+                Spacer()
+            }
+            .padding(.horizontal, 8)
+
+            ScrollView(.vertical, showsIndicators: true) {
+                let columns = [GridItem(.adaptive(minimum: isIPad ? 44 : 38), spacing: 4)]
+                LazyVGrid(columns: columns, spacing: 6) {
+                    ForEach(Array(activeEmojiList.enumerated()), id: \.offset) { _, emoji in
+                        Button(action: {
+                            triggerLightHaptic()
+                            onInsertText(emoji)
+                            appGroup.recordUsedEmoji(emoji)
+                        }) {
+                            Text(emoji)
+                                .font(.system(size: isIPad ? 30 : 27))
+                                .frame(width: isIPad ? 44 : 38, height: isIPad ? 40 : 36)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+            }
+            .frame(maxHeight: .infinity)
+
+            // Barre inférieure d'onglets Apple Emoji (ABC + 9 catégories + ⌫)
+            HStack(spacing: isIPad ? 6 : 2) {
+                Button(action: {
+                    triggerLightHaptic()
+                    currentLayer = .letters
+                }) {
+                    Text("ABC")
+                        .font(.system(size: isIPad ? 14 : 13, weight: .medium))
+                        .foregroundColor(.white)
+                        .frame(width: isIPad ? 48 : 38, height: 34)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(Color(hex: "#3A3A3C"))
+                        )
+                }
+                .buttonStyle(.plain)
+
+                Spacer(minLength: 2)
+
+                ForEach(AppleEmojiCategory.allCases) { category in
+                    let isSelected = (selectedEmojiCategory == category)
+                    Button(action: {
+                        triggerLightHaptic()
+                        selectedEmojiCategory = category
+                    }) {
+                        Image(systemName: category.sfSymbolIcon)
+                            .font(.system(size: isIPad ? 14 : 13, weight: .medium))
+                            .foregroundColor(isSelected ? .white : Color.white.opacity(0.45))
+                            .frame(width: isIPad ? 34 : 27, height: 30)
+                            .background(
+                                Circle()
+                                    .fill(isSelected ? Color(hex: "#3A3A3C") : Color.clear)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Spacer(minLength: 2)
+
+                Image(systemName: isHoldingBackspace ? "delete.left.fill" : "delete.left")
+                    .font(.system(size: isIPad ? 15 : 14, weight: .regular))
+                    .foregroundColor(.white)
+                    .frame(width: isIPad ? 44 : 36, height: 34)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(isHoldingBackspace ? Color(hex: "#636366") : Color(hex: "#3A3A3C"))
+                    )
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { _ in
+                                if !isHoldingBackspace {
+                                    startBackspaceRepeat()
+                                }
+                            }
+                            .onEnded { _ in
+                                stopBackspaceRepeat()
+                            }
+                    )
+            }
+            .padding(.horizontal, 4)
+            .padding(.top, 2)
         }
     }
 
@@ -224,7 +480,6 @@ public struct KeyboardLayoutView: View {
 
     private var collapsedVoiceBarView: some View {
         HStack(spacing: isIPad ? 10 : 6) {
-            // Bouton pour ré-afficher le clavier complet AZERTY
             Button(action: {
                 triggerLightHaptic()
                 withAnimation(.easeInOut(duration: 0.2)) {
@@ -248,7 +503,6 @@ public struct KeyboardLayoutView: View {
             }
             .buttonStyle(.plain)
 
-            // Touche 🌐 Globe
             Button(action: {
                 triggerLightHaptic()
                 onAdvanceToNextKeyboard()
@@ -264,7 +518,6 @@ public struct KeyboardLayoutView: View {
             }
             .buttonStyle(.plain)
 
-            // Pastille centrale d'état vocal
             Button(action: {
                 let generator = UIImpactFeedbackGenerator(style: .medium)
                 generator.impactOccurred()
@@ -290,7 +543,6 @@ public struct KeyboardLayoutView: View {
             }
             .buttonStyle(.plain)
 
-            // Bouton rapide Annuler dernière phrase
             Button(action: {
                 triggerLightHaptic()
                 let length = appGroup.lastInsertedSentenceLength
@@ -312,7 +564,6 @@ public struct KeyboardLayoutView: View {
             }
             .buttonStyle(.plain)
 
-            // Touche ⌫ Suppr avec maintien appuyé
             Image(systemName: isHoldingBackspace ? "delete.left.fill" : "delete.left")
                 .font(.system(size: isIPad ? 16 : 15, weight: .regular))
                 .foregroundColor(.white)
@@ -333,32 +584,27 @@ public struct KeyboardLayoutView: View {
                         }
                 )
 
-            // L'Orbe 3D pur
-            Button(action: {
-                let generator = UIImpactFeedbackGenerator(style: .medium)
-                generator.impactOccurred()
-                appGroup.requestToggleRecordingFromKeyboard()
-            }) {
-                GeminiBubbleView(
-                    bgHex: appGroup.bgHex,
-                    fgHex: appGroup.fgHex,
-                    audioLevel: CGFloat(appGroup.currentAudioLevel),
-                    state: appGroup.orbState,
-                    size: isIPad ? 44 : 40,
-                    showSideTab: false,
-                    onTap: nil
-                )
-                .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
+            GeminiBubbleView(
+                bgHex: appGroup.bgHex,
+                fgHex: appGroup.fgHex,
+                audioLevel: CGFloat(appGroup.currentAudioLevel),
+                state: appGroup.orbState,
+                size: isIPad ? 44 : 40,
+                showSideTab: false,
+                onTap: {
+                    let generator = UIImpactFeedbackGenerator(style: .medium)
+                    generator.impactOccurred()
+                    appGroup.requestToggleRecordingFromKeyboard()
+                }
+            )
+            .contentShape(Circle())
         }
     }
 
-    // MARK: - Barre Supérieure Vocale (Style Apple iOS Dictation Bar)
+    // MARK: - Barre Supérieure Vocale (Style Apple iOS Dictation Bar + Sélecteur de Langue)
 
     private var topVoiceControlBar: some View {
-        HStack(spacing: isIPad ? 8 : 6) {
-            // Bouton Réduire le clavier
+        HStack(spacing: isIPad ? 8 : 5) {
             Button(action: {
                 triggerLightHaptic()
                 showQuickOrbPopover = false
@@ -376,7 +622,7 @@ public struct KeyboardLayoutView: View {
                 }
                 .foregroundColor(Color.white.opacity(0.88))
                 .frame(height: 32)
-                .padding(.horizontal, isIPad ? 10 : 9)
+                .padding(.horizontal, isIPad ? 10 : 8)
                 .background(
                     Capsule()
                         .fill(Color(hex: "#2C2C2E"))
@@ -384,7 +630,6 @@ public struct KeyboardLayoutView: View {
             }
             .buttonStyle(.plain)
 
-            // Pastille d'état en direct
             Button(action: {
                 let generator = UIImpactFeedbackGenerator(style: .medium)
                 generator.impactOccurred()
@@ -401,7 +646,7 @@ public struct KeyboardLayoutView: View {
                         .lineLimit(1)
                 }
                 .frame(height: 32)
-                .padding(.horizontal, isIPad ? 12 : 10)
+                .padding(.horizontal, isIPad ? 12 : 9)
                 .background(
                     Capsule()
                         .fill(Color(hex: "#2C2C2E"))
@@ -410,7 +655,22 @@ public struct KeyboardLayoutView: View {
             }
             .buttonStyle(.plain)
 
-            // Bouton Annuler dernière phrase dictée
+            // Pastille rapide de langue (ex: 📱 FR / 🌐 AUTO / 🇬🇧 EN)
+            Button(action: {
+                triggerLightHaptic()
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showQuickOrbPopover.toggle()
+                }
+            }) {
+                Text(appGroup.selectedLanguage.shortPillLabel)
+                    .font(.system(size: isIPad ? 11 : 10, weight: .semibold))
+                    .foregroundColor(Color.white.opacity(0.90))
+                    .frame(height: 32)
+                    .padding(.horizontal, 8)
+                    .background(Capsule().fill(Color(hex: "#2C2C2E")))
+            }
+            .buttonStyle(.plain)
+
             Button(action: {
                 triggerLightHaptic()
                 let length = appGroup.lastInsertedSentenceLength
@@ -421,25 +681,16 @@ public struct KeyboardLayoutView: View {
                     onDeleteBackward()
                 }
             }) {
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.uturn.backward")
-                        .font(.system(size: 11, weight: .semibold))
-                    Text(isIPad ? "Annuler phrase" : "Annuler")
-                        .font(.system(size: isIPad ? 12 : 11, weight: .medium))
-                }
-                .foregroundColor(Color.white.opacity(0.88))
-                .frame(height: 32)
-                .padding(.horizontal, isIPad ? 11 : 9)
-                .background(
-                    Capsule()
-                        .fill(Color(hex: "#2C2C2E"))
-                )
+                Image(systemName: "arrow.uturn.backward")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(Color.white.opacity(0.88))
+                    .frame(width: 32, height: 32)
+                    .background(Circle().fill(Color(hex: "#2C2C2E")))
             }
             .buttonStyle(.plain)
 
             Spacer(minLength: 2)
 
-            // Bouton Réglages rapides (Modèle / Couleur)
             Button(action: {
                 triggerLightHaptic()
                 withAnimation(.easeInOut(duration: 0.2)) {
@@ -454,24 +705,28 @@ public struct KeyboardLayoutView: View {
             }
             .buttonStyle(.plain)
 
-            // L'Orbe 3D pur
-            Button(action: {
-                let generator = UIImpactFeedbackGenerator(style: .medium)
+            // L'Orbe 3D pur (Tap = Dicter, Appui Long = Menu Langue / Modèle)
+            GeminiBubbleView(
+                bgHex: appGroup.bgHex,
+                fgHex: appGroup.fgHex,
+                audioLevel: CGFloat(appGroup.currentAudioLevel),
+                state: appGroup.orbState,
+                size: isIPad ? 42 : 38,
+                showSideTab: false,
+                onTap: {
+                    let generator = UIImpactFeedbackGenerator(style: .medium)
+                    generator.impactOccurred()
+                    appGroup.requestToggleRecordingFromKeyboard()
+                }
+            )
+            .contentShape(Circle())
+            .onLongPressGesture(minimumDuration: 0.42) {
+                let generator = UIImpactFeedbackGenerator(style: .heavy)
                 generator.impactOccurred()
-                appGroup.requestToggleRecordingFromKeyboard()
-            }) {
-                GeminiBubbleView(
-                    bgHex: appGroup.bgHex,
-                    fgHex: appGroup.fgHex,
-                    audioLevel: CGFloat(appGroup.currentAudioLevel),
-                    state: appGroup.orbState,
-                    size: isIPad ? 42 : 38,
-                    showSideTab: false,
-                    onTap: nil
-                )
-                .contentShape(Circle())
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showQuickOrbPopover.toggle()
+                }
             }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 3)
     }
@@ -492,7 +747,7 @@ public struct KeyboardLayoutView: View {
 
     private var liveStatusTitle: String {
         if !appGroup.isBackgroundEngineActive && appGroup.orbState == .idle {
-            return isIPad ? "Activez le micro dans WhisperOrb" : "Micro en veille"
+            return isIPad ? "Activez le micro dans WhisperOrb" : "Micro veille"
         }
         switch appGroup.orbState {
         case .idle:
@@ -518,37 +773,68 @@ public struct KeyboardLayoutView: View {
         }
     }
 
-    // MARK: - Panneau Rapide de Modèle & Couleur
+    // MARK: - Panneau Rapide de Langue, Modèle & Couleur
 
     private var quickColorAndModelSelectorPanel: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Modèle IA & Style de l'Orbe")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(Color.white.opacity(0.75))
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Langue de dictée")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(Color.white.opacity(0.68))
 
-            HStack(spacing: 8) {
-                ForEach(WhisperModelTier.allCases) { tier in
-                    let isSelected = (appGroup.selectedModel == tier)
-                    Button(action: {
-                        triggerLightHaptic()
-                        appGroup.selectedModel = tier
-                    }) {
-                        VStack(spacing: 2) {
-                            Text(tier.shortBadgeName)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(WhisperLanguageSelection.allCases) { lang in
+                        let isSelected = (appGroup.selectedLanguage == lang)
+                        Button(action: {
+                            triggerLightHaptic()
+                            appGroup.selectedLanguage = lang
+                        }) {
+                            Text(lang.shortPillLabel)
                                 .font(.system(size: 12, weight: .semibold))
-                            Text(tier.latencyDescription)
-                                .font(.system(size: 10, weight: .regular))
-                                .opacity(0.75)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(isSelected ? Color(hex: "#0A84FF") : Color(hex: "#2C2C2E"))
+                                )
+                                .foregroundColor(.white)
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8.5, style: .continuous)
-                                .fill(isSelected ? Color(hex: "#0A84FF") : Color(hex: "#2C2C2E"))
-                        )
-                        .foregroundColor(.white)
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
+                }
+            }
+
+            Text("Modèle IA (Débloqué selon la RAM)")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(Color.white.opacity(0.68))
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(WhisperModelTier.allCases) { tier in
+                        let isUnlocked = HardwareDetector.isTierUnlocked(tier, simulate4GB: appGroup.simulateModest4GBDevice)
+                        let isSelected = (appGroup.selectedModel == tier)
+                        Button(action: {
+                            guard isUnlocked else { return }
+                            triggerLightHaptic()
+                            appGroup.selectedModel = tier
+                        }) {
+                            VStack(spacing: 2) {
+                                Text(isUnlocked ? tier.shortBadgeName : "🔒 \(tier.shortBadgeName)")
+                                    .font(.system(size: 11, weight: .semibold))
+                                Text(isUnlocked ? tier.latencyDescription : tier.requiredRAMBadgeText)
+                                    .font(.system(size: 9, weight: .regular))
+                                    .opacity(0.75)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(isSelected ? Color(hex: "#0A84FF") : Color(hex: "#2C2C2E").opacity(isUnlocked ? 1.0 : 0.45))
+                            )
+                            .foregroundColor(isUnlocked ? .white : Color.white.opacity(0.45))
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
 
@@ -562,7 +848,7 @@ public struct KeyboardLayoutView: View {
                         Text("Éclipse")
                             .font(.system(size: 11, weight: .medium))
                             .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
+                            .padding(.vertical, 6)
                             .background(RoundedRectangle(cornerRadius: 8).fill(Color(hex: "#2C2C2E")))
                             .foregroundColor(.white)
                     }
@@ -576,7 +862,7 @@ public struct KeyboardLayoutView: View {
                         Text("Perle")
                             .font(.system(size: 11, weight: .medium))
                             .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
+                            .padding(.vertical, 6)
                             .background(RoundedRectangle(cornerRadius: 8).fill(Color(hex: "#F8F9FA")))
                             .foregroundColor(Color(hex: "#1C1C1E"))
                     }
@@ -593,13 +879,13 @@ public struct KeyboardLayoutView: View {
                             HStack(spacing: 6) {
                                 Circle()
                                     .fill(Color(hex: preset.hex))
-                                    .frame(width: 14, height: 14)
+                                    .frame(width: 12, height: 12)
                                 Text(preset.name.components(separatedBy: " ").first ?? preset.name)
                                     .font(.system(size: 11, weight: .medium))
                                     .foregroundColor(.white)
                             }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 6)
                             .background(RoundedRectangle(cornerRadius: 8).fill(Color(hex: "#2C2C2E")))
                         }
                         .buttonStyle(.plain)
@@ -607,7 +893,7 @@ public struct KeyboardLayoutView: View {
                 }
             }
         }
-        .padding(12)
+        .padding(10)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -615,7 +901,7 @@ public struct KeyboardLayoutView: View {
         )
     }
 
-    // MARK: - Rangées 1 & 2 : Grille de Touches Standards Apple iOS (Avec Loupe + Appui Long Accents)
+    // MARK: - Rangées 1 & 2 : Grille de Touches Standards Apple iOS
 
     private func keyboardCharacterRow(keys: [String], rowOrder: Int) -> some View {
         HStack(spacing: isIPad ? 7 : 6) {
@@ -629,11 +915,10 @@ public struct KeyboardLayoutView: View {
         }
     }
 
-    // MARK: - Rangée 3 : ⇧ Maj + W X C V B N ' + ⌫ Suppr (Proportions Exactes Apple iOS)
+    // MARK: - Rangée 3 : ⇧ Maj + W X C V B N ' + ⌫ Suppr
 
     private var row3WithShiftAndBackspace: some View {
         HStack(spacing: isIPad ? 8 : 6) {
-            // Touche Gauche : ⇧ Maj (avec vrais SF Symbols Apple shift / shift.fill / capslock.fill)
             Button(action: {
                 triggerLightHaptic()
                 handleLeftModifierTap()
@@ -662,7 +947,6 @@ public struct KeyboardLayoutView: View {
 
             Spacer(minLength: isIPad ? 8 : 3)
 
-            // Touches Centrales : W, X, C, V, B, N, ' (ou . , ? ! ' en mode 123/#+=)
             HStack(spacing: isIPad ? 7 : 6) {
                 ForEach(Array(activeRow3Keys.enumerated()), id: \.element) { idx, key in
                     appleInteractiveCharacterKey(
@@ -675,7 +959,6 @@ public struct KeyboardLayoutView: View {
 
             Spacer(minLength: isIPad ? 8 : 3)
 
-            // Touche Droite : ⌫ Suppr avec SF Symbol natif delete.left et répétition continue
             Image(systemName: isHoldingBackspace ? "delete.left.fill" : "delete.left")
                 .font(.system(size: isIPad ? 18 : 16, weight: .regular))
                 .foregroundColor(.white)
@@ -756,7 +1039,6 @@ public struct KeyboardLayoutView: View {
             )
     }
 
-    /// Loupe d'aperçu Apple iOS qui s'affiche au-dessus du doigt dès qu'on touche une lettre
     private func appleSingleKeyMagnifierCallout(label: String) -> some View {
         ZStack {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -775,7 +1057,6 @@ public struct KeyboardLayoutView: View {
         .allowsHitTesting(false)
     }
 
-    /// Barre flottante d'accents Apple iOS à l'appui long (avec sélection par glissement horizontal)
     private func appleLongPressVariantsCallout(
         variants: [String],
         selectedIndex: Int,
@@ -786,7 +1067,6 @@ public struct KeyboardLayoutView: View {
         let itemHeight: CGFloat = isIPad ? 44 : 40
         let totalWidth = CGFloat(variants.count) * itemWidth + 10
 
-        // Décale intelligemment la bulle vers l'intérieur de l'écran si la touche est sur le bord gauche ou droit
         let horizontalShift: CGFloat = {
             if columnIndex <= 1 {
                 return max(0, (totalWidth - 40) * 0.45)
@@ -873,10 +1153,10 @@ public struct KeyboardLayoutView: View {
         }
     }
 
-    // MARK: - Rangée 4 : Barre Inférieure Native Apple iOS (123 + 🌐 + espace + retour)
+    // MARK: - Rangée 4 : Barre Inférieure Native Apple iOS (123 + 😀 Émojis + 🌐 Globe + espace + retour)
 
     private var row4BottomBar: some View {
-        HStack(spacing: isIPad ? 7 : 6) {
+        HStack(spacing: isIPad ? 7 : 5) {
             // Touche 123 / ABC
             Button(action: {
                 triggerLightHaptic()
@@ -889,7 +1169,24 @@ public struct KeyboardLayoutView: View {
                 Text(currentLayer == .letters ? "123" : "ABC")
                     .font(.system(size: isIPad ? 16 : 15, weight: .regular))
                     .foregroundColor(.white)
-                    .frame(width: isIPad ? 68 : 44, height: isIPad ? 45 : 42)
+                    .frame(width: isIPad ? 62 : 42, height: isIPad ? 45 : 42)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5.0, style: .continuous)
+                            .fill(Color(hex: "#48484A"))
+                            .shadow(color: Color.black.opacity(0.45), radius: 0.4, x: 0, y: 1.0)
+                    )
+            }
+            .buttonStyle(.plain)
+
+            // Touche 😀 Émojis Complets Apple (SF Symbol face.smiling)
+            Button(action: {
+                triggerLightHaptic()
+                currentLayer = .emojis
+            }) {
+                Image(systemName: "face.smiling")
+                    .font(.system(size: isIPad ? 19 : 18, weight: .regular))
+                    .foregroundColor(.white)
+                    .frame(width: isIPad ? 48 : 38, height: isIPad ? 45 : 42)
                     .background(
                         RoundedRectangle(cornerRadius: 5.0, style: .continuous)
                             .fill(Color(hex: "#48484A"))
@@ -906,7 +1203,7 @@ public struct KeyboardLayoutView: View {
                 Image(systemName: "globe")
                     .font(.system(size: isIPad ? 18 : 17, weight: .regular))
                     .foregroundColor(.white)
-                    .frame(width: isIPad ? 52 : 42, height: isIPad ? 45 : 42)
+                    .frame(width: isIPad ? 48 : 38, height: isIPad ? 45 : 42)
                     .background(
                         RoundedRectangle(cornerRadius: 5.0, style: .continuous)
                             .fill(Color(hex: "#48484A"))
@@ -932,7 +1229,7 @@ public struct KeyboardLayoutView: View {
             }
             .buttonStyle(.plain)
 
-            // Touche Retour ("retour", conforme au clavier français Apple iOS)
+            // Touche Retour ("retour")
             Button(action: {
                 triggerLightHaptic()
                 onInsertText("\n")
@@ -943,7 +1240,7 @@ public struct KeyboardLayoutView: View {
                 Text("retour")
                     .font(.system(size: isIPad ? 16 : 15, weight: .regular))
                     .foregroundColor(.white)
-                    .frame(width: isIPad ? 102 : 88, height: isIPad ? 45 : 42)
+                    .frame(width: isIPad ? 96 : 80, height: isIPad ? 45 : 42)
                     .background(
                         RoundedRectangle(cornerRadius: 5.0, style: .continuous)
                             .fill(Color(hex: "#48484A"))
@@ -954,7 +1251,7 @@ public struct KeyboardLayoutView: View {
         }
     }
 
-    // MARK: - Logique Métier des Touches, Casse (Shift / CapsLock) & Répétition Suppr
+    // MARK: - Logique Métier des Touches
 
     private var shiftSymbolName: String {
         switch shiftState {
@@ -977,7 +1274,7 @@ public struct KeyboardLayoutView: View {
 
     private func handleLeftModifierTap() {
         switch currentLayer {
-        case .letters:
+        case .letters, .emojis:
             let now = Date()
             if now.timeIntervalSince(lastShiftTapTime) < 0.35 {
                 shiftState = .capsLocked

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.WhisperOrb" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:statusBarColor">#09090B</item>
+        <item name="android:navigationBarColor">#09090B</item>
+        <item name="android:windowBackground">#09090B</item>
+        <item name="colorPrimary">#0A84FF</item>
+        <item name="colorAccent">#0A84FF</item>
+    </style>
+</resources>

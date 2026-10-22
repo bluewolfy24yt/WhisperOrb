@@ -22,12 +22,8 @@ public final class WhisperEngine: ObservableObject {
     private var whisperContext: OpaquePointer? = nil
     private let inferenceQueue = DispatchQueue(label: "com.bluewolfy24yt.whisperorb.metal.inference", qos: .userInteractive)
     public let optimalThreadCount: Int = HardwareDetector.optimalThreadCount
-    private var initialPromptCString: UnsafeMutablePointer<CChar>? = nil
-    private var frenchLangCString: UnsafeMutablePointer<CChar>? = nil
+    private var activeLangCString: UnsafeMutablePointer<CChar>? = nil
     private var cachedPromptTokens: [whisper_token] = []
-
-    // Seed ultra-court (2 tokens) pré-tokenisé une seule fois en RAM au chargement (0 ms de coût de tokenisation)
-    private let frenchPunctuationPrompt = "Bonjour,"
 
     // MARK: - Pipeline Audio Temps Réel (AVAudioEngine + Ré-échantillonneur Anti-Repliement 16 kHz)
 
@@ -50,8 +46,8 @@ public final class WhisperEngine: ObservableObject {
     // MARK: - Initialisation
 
     private init() {
-        self.initialPromptCString = strdup(frenchPunctuationPrompt)
-        self.frenchLangCString = strdup("fr")
+        let initialLang = AppGroupManager.shared.selectedLanguage.resolvedWhisperCode
+        self.activeLangCString = strdup(initialLang)
         setupInterProcessCallbacks()
         setupAudioSessionNotificationObservers()
     }
@@ -61,13 +57,9 @@ public final class WhisperEngine: ObservableObject {
             whisper_free(ctx)
             whisperContext = nil
         }
-        if let ptr = initialPromptCString {
-            free(ptr)
-            initialPromptCString = nil
-        }
-        if let langPtr = frenchLangCString {
+        if let langPtr = activeLangCString {
             free(langPtr)
-            frenchLangCString = nil
+            activeLangCString = nil
         }
     }
 
@@ -90,6 +82,42 @@ public final class WhisperEngine: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+
+        AppGroupManager.shared.$selectedLanguage
+            .dropFirst()
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] newLang in
+                guard let self = self else { return }
+                self.updateActiveLanguagePointer(to: newLang)
+            }
+            .store(in: &cancellables)
+    }
+
+    private func updateActiveLanguagePointer(to selection: WhisperLanguageSelection) {
+        let code = selection.resolvedWhisperCode
+        let promptSeed = selection.initialPunctuationPrompt
+
+        inferenceQueue.async { [weak self] in
+            guard let self = self else { return }
+            if let old = self.activeLangCString {
+                free(old)
+            }
+            self.activeLangCString = strdup(code)
+
+            if let validCtx = self.whisperContext {
+                var tempTokens = [whisper_token](repeating: 0, count: 16)
+                let count = promptSeed.withCString { cStr in
+                    tempTokens.withUnsafeMutableBufferPointer { buf in
+                        whisper_tokenize(validCtx, cStr, buf.baseAddress, Int32(buf.count))
+                    }
+                }
+                let extracted = count > 0 ? Array(tempTokens.prefix(Int(count))) : []
+                DispatchQueue.main.async {
+                    self.cachedPromptTokens = extracted
+                }
+            }
+        }
     }
 
     private func setupAudioSessionNotificationObservers() {
@@ -131,6 +159,11 @@ public final class WhisperEngine: ObservableObject {
     }
 
     public func loadModel(_ tier: WhisperModelTier) {
+        guard HardwareDetector.isTierUnlocked(tier, simulate4GB: AppGroupManager.shared.simulateModest4GBDevice) else {
+            lastErrorMessage = "Le modèle \(tier.displayName) nécessite \(tier.requiredRAMBadgeText) sur cet appareil."
+            return
+        }
+
         let modelURL = ModelDownloader.shared.localModelURL(for: tier)
         guard ModelDownloader.shared.isModelDownloaded(tier) else {
             lastErrorMessage = "Le modèle \(tier.displayName) n'est pas encore téléchargé."
@@ -146,12 +179,20 @@ public final class WhisperEngine: ObservableObject {
         lastErrorMessage = nil
         statusBannerMessage = "Chargement GPU Metal de \(tier.displayName) (\(tier.ramUsageMB) Mo)..."
 
-        // Libère impérativement le modèle précédent pour ne jamais avoir 2 modèles en RAM
         unloadCurrentModel()
 
         let modelPath = modelURL.path
+        let currentLangSelection = AppGroupManager.shared.selectedLanguage
+        let resolvedLang = currentLangSelection.resolvedWhisperCode
+        let promptSeed = currentLangSelection.initialPunctuationPrompt
+
         inferenceQueue.async { [weak self] in
             guard let self = self else { return }
+
+            if let old = self.activeLangCString {
+                free(old)
+            }
+            self.activeLangCString = strdup(resolvedLang)
 
             var cparams = whisper_context_default_params()
             cparams.use_gpu = true
@@ -170,20 +211,19 @@ public final class WhisperEngine: ObservableObject {
                 ctx = whisper_init_from_file_with_params(modelPath, cparams)
             }
 
-            // Pré-tokenisation unique du seed français et pré-chauffage des shaders Metal GPU
             var extractedTokens: [whisper_token] = []
             if let validCtx = ctx {
-                if let promptPtr = self.initialPromptCString {
-                    var tempTokens = [whisper_token](repeating: 0, count: 16)
-                    let count = tempTokens.withUnsafeMutableBufferPointer { buf in
-                        whisper_tokenize(validCtx, promptPtr, buf.baseAddress, Int32(buf.count))
-                    }
-                    if count > 0 {
-                        extractedTokens = Array(tempTokens.prefix(Int(count)))
+                var tempTokens = [whisper_token](repeating: 0, count: 16)
+                let count = promptSeed.withCString { cStr in
+                    tempTokens.withUnsafeMutableBufferPointer { buf in
+                        whisper_tokenize(validCtx, cStr, buf.baseAddress, Int32(buf.count))
                     }
                 }
+                if count > 0 {
+                    extractedTokens = Array(tempTokens.prefix(Int(count)))
+                }
 
-                var warmupParams = self.makeWhisperFullParams(audioDurationSeconds: 0.5)
+                var warmupParams = self.makeWhisperFullParams(audioDurationSeconds: 0.5, isAutoDetect: resolvedLang == "auto")
                 warmupParams.initial_prompt = nil
                 warmupParams.max_tokens = 1
                 let warmupSilence = [Float](repeating: 0.0, count: 8000)
@@ -199,7 +239,7 @@ public final class WhisperEngine: ObservableObject {
                 self.isLoadingModel = false
                 if ctx != nil {
                     let accelLabel = metalActive ? "GPU Metal + FlashAttention" : "\(self.optimalThreadCount) cœurs Performance"
-                    self.statusBannerMessage = "\(tier.displayName) actif • \(accelLabel)"
+                    self.statusBannerMessage = "\(tier.shortBadgeName) actif • \(accelLabel)"
                 } else {
                     self.lastErrorMessage = "Échec de l'initialisation du modèle \(tier.displayName)."
                     self.statusBannerMessage = "Erreur de chargement du modèle"
@@ -208,12 +248,12 @@ public final class WhisperEngine: ObservableObject {
         }
     }
 
-    private func makeWhisperFullParams(audioDurationSeconds: Double) -> whisper_full_params {
+    private func makeWhisperFullParams(audioDurationSeconds: Double, isAutoDetect: Bool) -> whisper_full_params {
         var wparams = whisper_full_default_params(WHISPER_SAMPLING_GREEDY)
-        if let langPtr = frenchLangCString {
+        if let langPtr = activeLangCString {
             wparams.language = UnsafePointer(langPtr)
         }
-        wparams.detect_language = false
+        wparams.detect_language = isAutoDetect
         wparams.translate = false
         wparams.n_threads = Int32(optimalThreadCount)
         wparams.single_segment = true
@@ -232,8 +272,6 @@ public final class WhisperEngine: ObservableObject {
         wparams.n_max_text_ctx = 32
         wparams.initial_prompt = nil
 
-        // Fenêtre d'encodage Metal ultra-ajustée (plancher 64 frames = 1,28 s au lieu de 1500 frames = 30 s)
-        // Divise par 2 le temps d'encodage GPU par rapport au plancher 128 sur les phrases courtes/moyennes
         let neededCtx = Int(ceil(audioDurationSeconds * 50.0)) + 12
         let alignedCtx = ((neededCtx + 31) / 32) * 32
         wparams.audio_ctx = Int32(max(64, min(1500, alignedCtx)))
@@ -276,7 +314,11 @@ public final class WhisperEngine: ObservableObject {
             let selectedTier = AppGroupManager.shared.selectedModel
             if ModelDownloader.shared.isModelDownloaded(selectedTier) && whisperContext == nil && !isLoadingModel {
                 loadModel(selectedTier)
-            } else if whisperContext == nil && !isLoadingModel, let anyDownloaded = WhisperModelTier.allCases.first(where: { ModelDownloader.shared.isModelDownloaded($0) }) {
+            } else if whisperContext == nil && !isLoadingModel,
+                      let anyDownloaded = WhisperModelTier.allCases.first(where: {
+                          ModelDownloader.shared.isModelDownloaded($0) &&
+                          HardwareDetector.isTierUnlocked($0, simulate4GB: AppGroupManager.shared.simulateModest4GBDevice)
+                      }) {
                 AppGroupManager.shared.selectedModel = anyDownloaded
                 loadModel(anyDownloaded)
             }
@@ -332,7 +374,7 @@ public final class WhisperEngine: ObservableObject {
         statusBannerMessage = "Moteur Audio arrêté"
     }
 
-    // MARK: - 3. Contrôle de l'Écoute (Démarrer / Arrêter depuis l'App ou le Clavier Goodnotes)
+    // MARK: - 3. Contrôle de l'Écoute
 
     public func toggleRecording() {
         if !isBackgroundEngineRunning || !audioEngine.isRunning {
@@ -355,11 +397,14 @@ public final class WhisperEngine: ObservableObject {
         if whisperContext == nil && !isLoadingModel {
             if ModelDownloader.shared.isModelDownloaded(tier) {
                 loadModel(tier)
-            } else if let fallback = WhisperModelTier.allCases.first(where: { ModelDownloader.shared.isModelDownloaded($0) }) {
+            } else if let fallback = WhisperModelTier.allCases.first(where: {
+                ModelDownloader.shared.isModelDownloaded($0) &&
+                HardwareDetector.isTierUnlocked($0, simulate4GB: AppGroupManager.shared.simulateModest4GBDevice)
+            }) {
                 AppGroupManager.shared.selectedModel = fallback
                 loadModel(fallback)
             } else {
-                lastErrorMessage = "Veuillez d'abord télécharger l'un des 3 modèles Whisper (Carte 2)."
+                lastErrorMessage = "Veuillez d'abord télécharger l'un des modèles Whisper hors-ligne (Carte 2)."
                 statusBannerMessage = "Aucun modèle hors-ligne téléchargé"
                 return
             }
@@ -377,7 +422,7 @@ public final class WhisperEngine: ObservableObject {
         audioBufferLock.unlock()
 
         AppGroupManager.shared.orbState = .listening
-        statusBannerMessage = "Écoute active (16 kHz Studio) — Parlez maintenant..."
+        statusBannerMessage = "Écoute active (\(AppGroupManager.shared.selectedLanguage.shortPillLabel)) — Parlez maintenant..."
     }
 
     public func finishListeningAndTranscribe() {
@@ -391,7 +436,6 @@ public final class WhisperEngine: ObservableObject {
 
         AppGroupManager.shared.updateLiveAudioLevel(0.0)
 
-        // Si moins de 0,20 s d'audio capturé, revenir au repos
         guard capturedFrames.count >= Int(targetSampleRate * 0.20) else {
             AppGroupManager.shared.orbState = .idle
             statusBannerMessage = "Audio trop court • Prêt"
@@ -401,7 +445,7 @@ public final class WhisperEngine: ObservableObject {
         runWhisperTranscription(on: capturedFrames)
     }
 
-    // MARK: - 4. Conversion Temps Réel Sans Perte vers 16000 Hz Mono Float32, Calcul RMS & VAD Mains-Libres
+    // MARK: - 4. Conversion Temps Réel vers 16000 Hz Mono Float32, Calcul RMS & VAD
 
     private func processMicrophoneBuffer(_ buffer: AVAudioPCMBuffer) {
         let currentState = AppGroupManager.shared.orbState
@@ -416,7 +460,6 @@ public final class WhisperEngine: ObservableObject {
         let monoSamples16kHz = convertBufferTo16kHzMonoFloat32(buffer)
         guard !monoSamples16kHz.isEmpty else { return }
 
-        // Calcul de l'amplitude RMS : RMS = sqrt((1/N) * sum(x_i^2))
         var sumSquares: Float = 0.0
         let sampleCount = monoSamples16kHz.count
         for sample in monoSamples16kHz {
@@ -424,12 +467,10 @@ public final class WhisperEngine: ObservableObject {
         }
         let rms = sqrt(sumSquares / Float(sampleCount))
 
-        // Conversion en niveau visuel lissé (smoothedLevel dans [0.0, 1.0])
         let normalizedVisual = min(1.0, max(0.0, (rms - 0.003) * 16.0))
         smoothedLevel = smoothedLevel * 0.60 + normalizedVisual * 0.40
         AppGroupManager.shared.updateLiveAudioLevel(smoothedLevel)
 
-        // Durée temporelle de ce buffer à 16 kHz
         let chunkDurationSeconds = Double(sampleCount) / targetSampleRate
         let vadSilenceLimit = max(0.45, min(2.5, AppGroupManager.shared.vadSilenceThresholdSeconds))
 
@@ -453,7 +494,6 @@ public final class WhisperEngine: ObservableObject {
             }
         }
 
-        // Sécurité anti-saturation RAM : transcription automatique au bout de 28 secondes continues
         let totalRecordedSeconds = Double(accumulatedSamples16kHz.count) / targetSampleRate
         if totalRecordedSeconds >= 28.0 {
             shouldTriggerAutoTranscribe = true
@@ -467,7 +507,6 @@ public final class WhisperEngine: ObservableObject {
         }
     }
 
-    /// Ré-échantillonneur direct 48/44.1 kHz -> 16 kHz Mono Float32 avec filtre passe-bas anti-repliement (zéro coupure inter-buffer)
     private func convertBufferTo16kHzMonoFloat32(_ inputBuffer: AVAudioPCMBuffer) -> [Float] {
         let inputFormat = inputBuffer.format
         let frameLength = Int(inputBuffer.frameLength)
@@ -501,8 +540,6 @@ public final class WhisperEngine: ObservableObject {
         let outputCount = max(1, Int(round(Double(frameLength) / ratio)))
         var resampled = [Float](repeating: 0.0, count: outputCount)
 
-        // Si le ratio est >= 2.0 (ex: 48 kHz -> 16 kHz, ratio 3:1), application d'un filtre FIR passe-bas 5-taps
-        // pour éliminer le repliement spectral tout en préservant les consonnes françaises (100 Hz - 7500 Hz)
         if ratio >= 2.0 && frameLength >= 5 {
             for outIdx in 0..<outputCount {
                 let centerPos = (Double(outIdx) + 0.5) * ratio - 0.5
@@ -534,22 +571,15 @@ public final class WhisperEngine: ObservableObject {
         return resampled
     }
 
-    /// Conditionnement vocal studio avant envoi à Whisper :
-    /// 1) Suppression offset DC + filtre passe-haut 80 Hz (anti-grondement)
-    /// 2) Découpe des longs silences inutiles en début/fin
-    /// 3) Normalisation dynamique du gain (AGC logiciel vers -1,4 dBFS / 0.85 crête)
-    /// 4) Marges de silence de sécurité (0,15 s début + 0,60 s fin, durée min >= 1,35 s) requises par whisper.cpp
     private func prepareAudioFramesForWhisper(_ rawFrames: [Float]) -> [Float] {
         guard !rawFrames.isEmpty else { return [] }
 
-        // 1. Calcul de l'offset DC moyen
         var sum: Float = 0.0
         for s in rawFrames {
             sum += s
         }
         let mean = sum / Float(rawFrames.count)
 
-        // Filtre passe-haut 1er ordre à ~80 Hz (16 kHz) pour retirer les bruits sourds de manipulation de l'iPhone
         var filtered = [Float](repeating: 0.0, count: rawFrames.count)
         var prevX: Float = 0.0
         var prevY: Float = 0.0
@@ -568,10 +598,8 @@ public final class WhisperEngine: ObservableObject {
             }
         }
 
-        // Si le signal est un silence quasi-total, retourner vide pour éviter toute hallucination
         guard maxPeak >= 0.002 else { return [] }
 
-        // 2. Détection du début et de la fin réelle de la voix par fenêtres de 20 ms (320 échantillons)
         let windowSize = 320
         let voiceThreshold = max(0.0025, maxPeak * 0.045)
         var firstVoiceSample = 0
@@ -597,7 +625,6 @@ public final class WhisperEngine: ObservableObject {
             }
         }
 
-        // Garde 0,08 s avant le premier son et 0,14 s après le dernier son
         let preRoll = Int(targetSampleRate * 0.08)
         let postRoll = Int(targetSampleRate * 0.14)
         let startIdx = max(0, firstVoiceSample - preRoll)
@@ -605,7 +632,6 @@ public final class WhisperEngine: ObservableObject {
 
         var trimmed = Array(filtered[startIdx...endIdx])
 
-        // 3. Normalisation automatique du volume (AGC logiciel vers 0.85 crête, gain max 28x)
         var trimmedPeak: Float = 0.0
         for s in trimmed {
             let a = abs(s)
@@ -617,7 +643,6 @@ public final class WhisperEngine: ObservableObject {
             let gain = min(28.0, max(1.0, targetPeak / trimmedPeak))
             for i in 0..<trimmed.count {
                 let amplified = trimmed[i] * gain
-                // Limiteur doux (soft-knee) au-delà de 0.88 pour éviter toute saturation numérique
                 if amplified > 0.88 {
                     trimmed[i] = min(0.99, 0.88 + 0.11 * tanh((amplified - 0.88) / 0.11))
                 } else if amplified < -0.88 {
@@ -628,7 +653,6 @@ public final class WhisperEngine: ObservableObject {
             }
         }
 
-        // 4. Marges de silence ultra-courtes (0,05 s en tête + 0,15 s en queue, min 0,65 s au total)
         let leadingPad = [Float](repeating: 0.0, count: Int(targetSampleRate * 0.05))
         let trailingPad = [Float](repeating: 0.0, count: Int(targetSampleRate * 0.15))
         var finalBuffer: [Float] = []
@@ -656,8 +680,12 @@ public final class WhisperEngine: ObservableObject {
         }
 
         let audioDurationSeconds = Double(conditionedFrames.count) / targetSampleRate
-        let baseParams = makeWhisperFullParams(audioDurationSeconds: audioDurationSeconds)
-        let promptTokensSnapshot = (loadedTier == .eclair) ? [] : cachedPromptTokens
+        let isAutoDetect = (AppGroupManager.shared.selectedLanguage == .auto)
+        let baseParams = makeWhisperFullParams(audioDurationSeconds: audioDurationSeconds, isAutoDetect: isAutoDetect)
+
+        // Pas de prompt initial sur Nano/Flash pour éviter qu'un petit modèle ne répète le seed
+        let isSmallModel = (loadedTier == .nano || loadedTier == .eclair)
+        let promptTokensSnapshot = (isSmallModel || isAutoDetect) ? [] : cachedPromptTokens
 
         isTranscribingNow = true
         AppGroupManager.shared.orbState = .transcribing
@@ -715,7 +743,7 @@ public final class WhisperEngine: ObservableObject {
         }
     }
 
-    // MARK: - 6. Post-Traitement Intelligent & Commandes Vocales Spéciales Copie DST
+    // MARK: - 6. Post-Traitement Multilingue + Mémoire JSON (user_style_memory.json)
 
     private func handleRawTranscribedText(_ rawText: String, latencyMs: Int) {
         let cleaned = postProcessFrenchDictation(rawText)
@@ -733,14 +761,12 @@ public final class WhisperEngine: ObservableObject {
             return
         }
 
-        // Mise à jour de la zone de test locale dans l'application
         if liveTestTranscript.isEmpty || liveTestTranscript.hasSuffix("\n") || liveTestTranscript.hasSuffix(" ") {
             liveTestTranscript += finalResult + (AppGroupManager.shared.autoSpaceForGoodnotes && !finalResult.hasSuffix("\n") ? " " : "")
         } else {
             liveTestTranscript += " " + finalResult + (AppGroupManager.shared.autoSpaceForGoodnotes && !finalResult.hasSuffix("\n") ? " " : "")
         }
 
-        // Envoi instantané au clavier WhisperKeyboard
         AppGroupManager.shared.publishTranscribedText(finalResult)
         statusBannerMessage = "Transcrit en \(latencyMs) ms • Inséré au clavier"
     }
@@ -749,25 +775,28 @@ public final class WhisperEngine: ObservableObject {
         var text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
 
-        // 1. Filtrage des hallucinations connues de Whisper sur les silences et du prompt initial
+        // 1. Filtrage des hallucinations connues de Whisper sur les silences (FR / EN / International)
         let hallucinationPatterns: [String] = [
             "[BLANK_AUDIO]",
             "[blank_audio]",
             "(blank_audio)",
             "[ Musique ]",
             "[Musique]",
+            "[ Music ]",
+            "[Music]",
             "[ Applaudissements ]",
             "[ Silence ]",
             "[Silence]",
             "Sous-titres réalisés para la communauté d'Amara.org",
             "Sous-titres réalisés par la communauté d'Amara.org",
             "Sous-titres réalisés",
+            "Subtitles by the Amara.org community",
+            "Thank you for watching",
+            "Thanks for watching",
             "Merci d'avoir regardé cette vidéo",
             "Merci d'avoir regardé",
             "Abonnez-vous",
-            "S'abonner",
-            "voici une dictée vocale en français avec une orthographe exacte",
-            "Bonjour, comment allez-vous ? Très bien, merci."
+            "S'abonner"
         ]
 
         for pattern in hallucinationPatterns {
@@ -779,7 +808,7 @@ public final class WhisperEngine: ObservableObject {
             return nil
         }
 
-        // 2. Détection de la commande vocale d'effacement de la dernière phrase
+        // 2. Détection de la commande vocale d'effacement de la dernière phrase (FR + EN)
         let lower = text.lowercased()
             .trimmingCharacters(in: CharacterSet.punctuationCharacters.union(.whitespacesAndNewlines))
 
@@ -788,30 +817,32 @@ public final class WhisperEngine: ObservableObject {
            lower == "annuler la dernière phrase" ||
            lower == "annuler la derniere phrase" ||
            lower == "supprimer la dernière phrase" ||
-           lower == "supprimer la derniere phrase" {
+           lower == "supprimer la derniere phrase" ||
+           lower == "delete last sentence" ||
+           lower == "undo last sentence" {
             return "__COMMAND_DELETE_LAST_SENTENCE__"
         }
 
-        // 3. Commandes vocales isolées pour la ponctuation et la mise en page DST
-        if lower == "point d'interrogation" {
+        // 3. Commandes vocales isolées pour la ponctuation (FR + EN)
+        if lower == "point d'interrogation" || lower == "question mark" {
             return "?"
         }
-        if lower == "point d'exclamation" {
+        if lower == "point d'exclamation" || lower == "exclamation mark" || lower == "exclamation point" {
             return "!"
         }
-        if lower == "point" || lower == "point final" {
+        if lower == "point" || lower == "point final" || lower == "period" || lower == "full stop" {
             return "."
         }
-        if lower == "virgule" {
+        if lower == "virgule" || lower == "comma" {
             return ","
         }
-        if lower == "deux points" || lower == "deux-points" {
+        if lower == "deux points" || lower == "deux-points" || lower == "colon" {
             return " :"
         }
-        if lower == "point-virgule" || lower == "point virgule" {
+        if lower == "point-virgule" || lower == "point virgule" || lower == "semicolon" {
             return " ;"
         }
-        if lower == "nouveau paragraphe" || lower == "à la ligne" || lower == "a la ligne" {
+        if lower == "nouveau paragraphe" || lower == "à la ligne" || lower == "a la ligne" || lower == "new line" || lower == "new paragraph" {
             return "\n"
         }
         if lower == "double saut de ligne" {
@@ -822,12 +853,16 @@ public final class WhisperEngine: ObservableObject {
         let inlineReplacements: [(pattern: String, replacement: String)] = [
             ("double saut de ligne", "\n\n"),
             ("nouveau paragraphe", "\n"),
+            ("new paragraph", "\n"),
             ("à la ligne", "\n"),
             ("a la ligne", "\n"),
+            ("new line", "\n"),
             ("ouvrir les guillemets", "« "),
             ("fermer les guillemets", " »"),
             ("point d'interrogation", "?"),
+            ("question mark", "?"),
             ("point d'exclamation", "!"),
+            ("exclamation mark", "!"),
             ("point-virgule", ";"),
             ("point virgule", ";"),
             ("deux-points", ":"),
@@ -842,7 +877,7 @@ public final class WhisperEngine: ObservableObject {
             )
         }
 
-        // 5. Nettoyage des espaces multiples et normalisation de la ponctuation française sans écraser les \n
+        // 5. Nettoyage des espaces multiples
         let lines = text.components(separatedBy: "\n")
         let cleanedLines = lines.map { line -> String in
             let components = line.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
@@ -863,6 +898,10 @@ public final class WhisperEngine: ObservableObject {
                 text += "."
             }
         }
+
+        // 7. Application de la mémoire personnelle user_style_memory.json (par langue + habitudes de ponctuation)
+        let activeLang = AppGroupManager.shared.selectedLanguage.effectiveStyleLanguageCode
+        text = UserStyleMemoryManager.shared.applyStyleMemory(to: text, languageCode: activeLang)
 
         return text.isEmpty ? nil : text
     }

@@ -1,4 +1,4 @@
-name: Build & Release WhisperOrb (.ipa)
+name: Build & Release WhisperOrb v2.0.0 (.ipa & .apk)
 
 on:
   push:
@@ -9,6 +9,70 @@ permissions:
   contents: write
 
 jobs:
+  build-android:
+    name: Compile Android Native NDK APK (arm64-v8a)
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1. Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 2. Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 3. Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: 4. Clone Official whisper.cpp (b5454) for Android NDK
+        run: |
+          rm -rf android/app/src/main/cpp/whisper.cpp
+          git clone --depth 1 --branch b5454 https://github.com/ggml-org/whisper.cpp.git android/app/src/main/cpp/whisper.cpp
+
+      - name: 5. Build Release APK (WhisperOrb-Android.apk)
+        working-directory: android
+        run: |
+          gradle assembleRelease --no-daemon --stacktrace
+          APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          if [ -z "$APK_PATH" ]; then
+            echo "Erreur : APK introuvable !"
+            exit 1
+          fi
+          cp "$APK_PATH" ../WhisperOrb-Android.apk
+          ls -lh ../WhisperOrb-Android.apk
+
+      - name: 6. Upload Android APK as Workflow Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WhisperOrb-Android-APK
+          path: WhisperOrb-Android.apk
+          if-no-files-found: error
+
+      - name: 7. Publish Android APK to GitHub Release v2.0.0
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v2.0.0
+          name: "WhisperOrb v2.0.0 — Apple (.ipa) & Android (.apk)"
+          body: |
+            ## 🫧 WhisperOrb `v2.0.0` — 100% On-Device Offline AI Voice Dictation (Apple & Android)
+
+            ### 🇬🇧 Quick Download & Setup
+            - 🤖 **Android (`WhisperOrb-Android.apk`)**: Install on any Android 8.0+ (ARM64) device, download your preferred Whisper model (up to **Whisper TITAN Large-v3 1.08 GB** on 12 GB+ RAM phones like the **Pixel 9 Pro XL**), and enable the **WhisperOrb Accessibility Service** to dock the 120 Hz 3D Orb onto your default keyboard (auto-hides on numeric keypads).
+            - 🍎 **Apple iOS / iPadOS / macOS (`WhisperOrb-iPad.ipa`)**: Install via **SideStore**, **AltStore**, **Sideloadly**, or `isideload`, download a model, and enable the native WhisperOrb keyboard (now featuring the full 9-category Apple Emoji Picker, accents, and `user_style_memory.json`).
+
+            ---
+
+            ### 🇫🇷 Téléchargement & Installation Rapide
+            - 🤖 **Android (`WhisperOrb-Android.apk`)** : Installez l'APK, téléchargez l'un des **7 modèles Whisper** (jusqu'à **Whisper TITAN Large-v3 1,08 Go**), et activez le service d'accessibilité pour greffer l'Orbe 3D sur votre clavier Android par défaut (avec protection automatique des claviers de chiffres).
+            - 🍎 **Apple iOS / iPadOS / macOS (`WhisperOrb-iPad.ipa`)** : Installez l'IPA via **SideStore**, **AltStore** ou **Sideloadly**, téléchargez un modèle et activez le clavier WhisperOrb complet (avec tous les émojis Apple, accents, multilingue intelligent et mémoire `user_style_memory.json`).
+          files: WhisperOrb-Android.apk
+          draft: false
+          prerelease: false
+          make_latest: true
+
   build-ipa:
     name: Compile Unsigned iPadOS/iOS IPA on macOS 15
     runs-on: macos-15
@@ -67,18 +131,11 @@ jobs:
           path: WhisperOrb-iPad.ipa
           if-no-files-found: error
 
-      - name: 8. Publish Automatic GitHub Release (latest)
+      - name: 8. Publish Apple IPA to GitHub Release v2.0.0
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.${{ github.run_number }}
-          name: "WhisperOrb iPadOS/iOS v1.0.${{ github.run_number }} (Build Auto)"
-          body: |
-            ## 🫧 WhisperOrb — Dictée Vocale Hors-Ligne (iPad Pro & iPhone)
-            
-            ### 📥 Installation rapide :
-            1. Téléchargez le fichier **`WhisperOrb-iPad.ipa`** ci-dessous.
-            2. Installez-le sur votre iPad ou iPhone via **SideStore**, **AltStore** ou **Sideloadly**.
-            3. Ouvrez **WhisperOrb**, téléchargez le modèle **Whisper Expert** (ou **Whisper PRO**), puis activez le clavier dans *Réglages > Général > Clavier > Claviers > Ajouter un clavier > WhisperOrb (Autoriser l'accès complet)*.
+          tag_name: v2.0.0
+          name: "WhisperOrb v2.0.0 — Apple (.ipa) & Android (.apk)"
           files: WhisperOrb-iPad.ipa
           draft: false
           prerelease: false

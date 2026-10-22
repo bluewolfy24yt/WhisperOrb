@@ -5,100 +5,322 @@ import Combine
 import CoreFoundation
 import Metal
 
-// MARK: - Énumération des 3 Modèles Whisper (Partagée App + Clavier)
+// MARK: - Sélecteur Intelligent de Langue Multilingue (Zéro "fr" codé en dur)
+
+public enum WhisperLanguageSelection: String, CaseIterable, Codable, Identifiable {
+    case system = "system"
+    case auto = "auto"
+    case fr = "fr"
+    case en = "en"
+    case es = "es"
+    case de = "de"
+    case it = "it"
+    case pt = "pt"
+    case nl = "nl"
+    case pl = "pl"
+    case ja = "ja"
+    case ko = "ko"
+    case zh = "zh"
+    case ar = "ar"
+    case ru = "ru"
+
+    public var id: String { rawValue }
+
+    /// Code ISO 639-1 à 2 lettres détecté sur le téléphone (ex: "fr", "en", "es"...)
+    public static var detectedSystemISOCode: String {
+        let supportedCodes: Set<String> = ["fr", "en", "es", "de", "it", "pt", "nl", "pl", "ja", "ko", "zh", "ar", "ru"]
+        if let preferred = Locale.preferredLanguages.first {
+            let prefix2 = String(preferred.prefix(2)).lowercased()
+            if supportedCodes.contains(prefix2) {
+                return prefix2
+            }
+        }
+        let currentCode = (Locale.current.language.languageCode?.identifier ?? "en").lowercased()
+        let prefix2 = String(currentCode.prefix(2))
+        return supportedCodes.contains(prefix2) ? prefix2 : "en"
+    }
+
+    /// Code envoyé à whisper.cpp ("auto" uniquement si l'utilisateur a explicitement choisi l'auto-détection)
+    public var resolvedWhisperCode: String {
+        switch self {
+        case .system:
+            return Self.detectedSystemISOCode
+        case .auto:
+            return "auto"
+        default:
+            return rawValue
+        }
+    }
+
+    /// Code de langue effectif pour user_style_memory.json
+    public var effectiveStyleLanguageCode: String {
+        switch self {
+        case .system, .auto:
+            return Self.detectedSystemISOCode
+        default:
+            return rawValue
+        }
+    }
+
+    public var flagEmoji: String {
+        switch self {
+        case .system: return "📱"
+        case .auto:   return "🌐"
+        case .fr:     return "🇫🇷"
+        case .en:     return "🇬🇧"
+        case .es:     return "🇪🇸"
+        case .de:     return "🇩🇪"
+        case .it:     return "🇮🇹"
+        case .pt:     return "🇵🇹"
+        case .nl:     return "🇳🇱"
+        case .pl:     return "🇵🇱"
+        case .ja:     return "🇯🇵"
+        case .ko:     return "🇰🇷"
+        case .zh:     return "🇨🇳"
+        case .ar:     return "🇸🇦"
+        case .ru:     return "🇷🇺"
+        }
+    }
+
+    public var displayName: String {
+        switch self {
+        case .system:
+            return "Langue du système (\(Self.detectedSystemISOCode.uppercased()) • Recommandé)"
+        case .auto:
+            return "Auto-détection Whisper (Medium / Turbo / TITAN)"
+        case .fr: return "Français (FR)"
+        case .en: return "English (EN)"
+        case .es: return "Español (ES)"
+        case .de: return "Deutsch (DE)"
+        case .it: return "Italiano (IT)"
+        case .pt: return "Português (PT)"
+        case .nl: return "Nederlands (NL)"
+        case .pl: return "Polski (PL)"
+        case .ja: return "日本語 (JA)"
+        case .ko: return "한국어 (KO)"
+        case .zh: return "中文 (ZH)"
+        case .ar: return "العربية (AR)"
+        case .ru: return "Русский (RU)"
+        }
+    }
+
+    public var shortPillLabel: String {
+        switch self {
+        case .system:
+            return "📱 \(Self.detectedSystemISOCode.uppercased())"
+        case .auto:
+            return "🌐 AUTO"
+        default:
+            return "\(flagEmoji) \(rawValue.uppercased())"
+        }
+    }
+
+    /// Seed de ponctuation ultra-court adapté à la langue pour guider Whisper sans biaiser le texte
+    public var initialPunctuationPrompt: String {
+        let code = effectiveStyleLanguageCode
+        switch code {
+        case "fr": return "Bonjour,"
+        case "en": return "Hello,"
+        case "es": return "Hola,"
+        case "de": return "Hallo,"
+        case "it": return "Ciao,"
+        case "pt": return "Olá,"
+        case "nl": return "Hallo,"
+        case "pl": return "Cześć,"
+        case "ja": return "こんにちは、"
+        case "ko": return "안녕하세요,"
+        case "zh": return "你好，"
+        case "ar": return "مرحباً،"
+        case "ru": return "Привет,"
+        default:   return "Hello,"
+        }
+    }
+}
+
+// MARK: - Catalogue Complet des 7 Modèles Whisper (De Nano 31 Mo jusqu'à TITAN Large-v3 1,08 Go)
 
 public enum WhisperModelTier: String, CaseIterable, Codable, Identifiable {
+    case nano = "nano"
     case eclair = "eclair"
     case normal = "normal"
+    case medium = "medium"
     case zeroFaute = "zeroFaute"
+    case expertPlus = "expertPlus"
+    case titan = "titan"
 
     public var id: String { rawValue }
 
     public var displayName: String {
         switch self {
+        case .nano:
+            return "⚡ Whisper Nano"
         case .eclair:
-            return "Whisper Flash"
+            return "⚡ Whisper Flash"
         case .normal:
-            return "Whisper PRO"
+            return "⚖️ Whisper PRO"
+        case .medium:
+            return "🔥 Whisper Medium"
         case .zeroFaute:
-            return "Whisper Expert"
+            return "🚀 Whisper Expert (v3 Turbo)"
+        case .expertPlus:
+            return "💎 Whisper Expert+ (Turbo Q8)"
+        case .titan:
+            return "👑 Whisper TITAN (Large-v3 Full)"
         }
     }
 
     public var shortBadgeName: String {
         switch self {
+        case .nano:
+            return "Whisper Nano"
         case .eclair:
             return "Whisper Flash"
         case .normal:
             return "Whisper PRO"
+        case .medium:
+            return "Whisper Medium"
         case .zeroFaute:
             return "Whisper Expert"
+        case .expertPlus:
+            return "Expert+ Q8"
+        case .titan:
+            return "Whisper TITAN"
         }
     }
 
     public var subtitle: String {
         switch self {
+        case .nano:
+            return "Ultra-léger (Tiny Q5) • Réponse éclair sur tous les appareils"
         case .eclair:
-            return "Instantané • Messages rapides & notes courtes"
+            return "Instantané (Base Q5) • Messages courts & notes rapides"
         case .normal:
-            return "Équilibré • Dictée quotidienne fluide & précise"
+            return "Équilibré (Small Q5) • Dictée quotidienne fluide & précise"
+        case .medium:
+            return "Haute fidélité (Medium Q5) • Vocabulaire riche & multilingue"
         case .zeroFaute:
-            return "Haute précision • Rédaction longue & vocabulaire complexe"
+            return "Large-v3 Turbo Q5 • Très haute précision & faible latence"
+        case .expertPlus:
+            return "Large-v3 Turbo Q8 (8-bit) • Fidélité studio quasi sans perte"
+        case .titan:
+            return "Large-v3 Complet (1,55 Md params) • Le modèle maître absolu"
         }
     }
 
     public var fileName: String {
         switch self {
+        case .nano:
+            return "ggml-tiny-q5_1.bin"
         case .eclair:
             return "ggml-base-q5_1.bin"
         case .normal:
             return "ggml-small-q5_1.bin"
+        case .medium:
+            return "ggml-medium-q5_0.bin"
         case .zeroFaute:
             return "ggml-large-v3-turbo-q5_0.bin"
+        case .expertPlus:
+            return "ggml-large-v3-turbo-q8_0.bin"
+        case .titan:
+            return "ggml-large-v3-q5_0.bin"
         }
     }
 
     public var downloadURL: URL {
-        switch self {
-        case .eclair:
-            return URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_1.bin")!
-        case .normal:
-            return URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin")!
-        case .zeroFaute:
-            return URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin")!
-        }
+        return URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/\(fileName)")!
     }
 
     public var sizeMB: Int {
         switch self {
+        case .nano:
+            return 31
         case .eclair:
             return 60
         case .normal:
             return 190
+        case .medium:
+            return 539
         case .zeroFaute:
             return 540
+        case .expertPlus:
+            return 874
+        case .titan:
+            return 1080
         }
     }
 
     public var ramUsageMB: Int {
         switch self {
+        case .nano:
+            return 120
         case .eclair:
             return 190
         case .normal:
             return 380
+        case .medium:
+            return 900
         case .zeroFaute:
-            return 850
+            return 950
+        case .expertPlus:
+            return 1320
+        case .titan:
+            return 2150
+        }
+    }
+
+    /// RAM physique minimale requise sur le téléphone/tablette pour débloquer ce modèle sans crash OOM
+    public var minimumRequiredRAMGB: Double {
+        switch self {
+        case .nano:
+            return 2.0
+        case .eclair:
+            return 2.8
+        case .normal:
+            return 3.6
+        case .medium:
+            return 5.4
+        case .zeroFaute:
+            return 5.4
+        case .expertPlus:
+            return 7.4
+        case .titan:
+            return 11.2
+        }
+    }
+
+    public var requiredRAMBadgeText: String {
+        switch self {
+        case .nano:
+            return "2 Go+ RAM"
+        case .eclair:
+            return "3 Go+ RAM"
+        case .normal:
+            return "4 Go+ RAM"
+        case .medium, .zeroFaute:
+            return "6 Go+ RAM"
+        case .expertPlus:
+            return "8 Go+ RAM"
+        case .titan:
+            return "12 Go+ RAM"
         }
     }
 
     public var latencyDescription: String {
         switch self {
+        case .nano:
+            return "~0,11 s"
         case .eclair:
             return "~0,18 s"
         case .normal:
             return "~0,35 s"
+        case .medium:
+            return "~0,75 s"
         case .zeroFaute:
-            return "~0,65 s"
+            return "~0,60 s"
+        case .expertPlus:
+            return "~0,72 s"
+        case .titan:
+            return "~1,15 s"
         }
     }
 }
@@ -112,6 +334,18 @@ public struct HardwareDetector {
 
     public static var physicalMemoryGB: Double {
         Double(physicalMemoryBytes) / (1024.0 * 1024.0 * 1024.0)
+    }
+
+    public static func effectiveMemoryGB(simulate4GB: Bool) -> Double {
+        return simulate4GB ? 4.0 : physicalMemoryGB
+    }
+
+    public static func isTierUnlocked(_ tier: WhisperModelTier, simulate4GB: Bool = false) -> Bool {
+        return effectiveMemoryGB(simulate4GB: simulate4GB) >= tier.minimumRequiredRAMGB
+    }
+
+    public static func unlockedTiers(simulate4GB: Bool = false) -> [WhisperModelTier] {
+        return WhisperModelTier.allCases.filter { isTierUnlocked($0, simulate4GB: simulate4GB) }
     }
 
     public static var formattedMemoryGB: String {
@@ -257,7 +491,6 @@ public struct HardwareDetector {
             return "iPhone 16 Pro — A18 Pro"
         case "iPhone17,2":
             return "iPhone 16 Pro Max — A18 Pro"
-        // Gamme iPhone 17 (A19 / A19 Pro)
         case "iPhone18,3":
             return "iPhone 17 — A19"
         case "iPhone18,4":
@@ -268,9 +501,8 @@ public struct HardwareDetector {
             return "iPhone 17 Pro Max — A19 Pro"
         case "iPhone18,5":
             return "iPhone 17e — A19"
-        // Gamme iPhone 18 (A20 / A20 Pro)
         case "iPhone19,3":
-            return "iPhone 18 — A20"
+            return "iPhone 18 — A19 / A20"
         case "iPhone19,4":
             return "iPhone 18 Air — A20"
         case "iPhone19,1":
@@ -283,7 +515,6 @@ public struct HardwareDetector {
         }
     }
 
-    /// Décodeur dynamique Future-Proof : supporte automatiquement tous les futurs iPhone (19, 20, 21...), iPad et Mac
     private static func futureProofDeviceDescription(for code: String) -> String {
         let chip = metalGPUChipName
         if code.hasPrefix("iPhone") {
@@ -316,28 +547,31 @@ public struct HardwareDetector {
         UIScreen.main.maximumFramesPerSecond >= 120
     }
 
-    public static var recommendedTier: WhisperModelTier {
-        if physicalMemoryGB >= 5.2 {
+    public static func recommendedTier(simulate4GB: Bool = false) -> WhisperModelTier {
+        let ram = effectiveMemoryGB(simulate4GB: simulate4GB)
+        if ram >= 11.2 {
+            return .expertPlus
+        } else if ram >= 5.4 {
             return .zeroFaute
-        } else if physicalMemoryGB >= 3.5 {
+        } else if ram >= 3.6 {
             return .normal
         } else {
             return .eclair
         }
     }
 
-    /// Sélectionne uniquement les cœurs CPU Haute Performance (évite les petits cœurs Efficacité Blizzard/Sawtooth qui brident whisper.cpp)
+    public static var recommendedTier: WhisperModelTier {
+        return recommendedTier(simulate4GB: false)
+    }
+
     public static var optimalThreadCount: Int {
         let totalCores = ProcessInfo.processInfo.activeProcessorCount
         if isRunningOnMac {
             return max(4, min(8, totalCores - 2))
         }
-        // Sur iPhone (6 cœurs = 2 Performance + 4 Efficacité), utiliser strictement les 2 cœurs Performance
-        // pendant que le GPU Metal exécute les calculs matriciels (zéro attente barrière, chauffe divisée par 2)
         if UIDevice.current.userInterfaceIdiom == .phone || totalCores <= 6 {
             return 2
         }
-        // Sur iPad Pro / Air 8 cœurs (A12X, A12Z, M1, M2, M3, M4, M5 = 4 Performance + 4 Efficacité) : 4 threads
         return min(6, max(4, totalCores / 2))
     }
 
@@ -352,6 +586,8 @@ public struct WhisperSharedStatePayload: Codable, Equatable {
     public var bgHex: String
     public var fgHex: String
     public var selectedModelRaw: String
+    public var selectedLanguageRaw: String?
+    public var simulateModest4GBDevice: Bool?
     public var orbStateRaw: String
     public var currentAudioLevel: Float
     public var pendingTranscribedText: String
@@ -371,7 +607,6 @@ public struct WhisperSharedStatePayload: Codable, Equatable {
 public final class AppGroupManager: ObservableObject {
     public static let shared = AppGroupManager()
 
-    /// Détecte dynamiquement l'App Group réel (compatible avec le suffixe Team ID ajouté par isideload / SideStore / AltStore)
     public static let appGroupIdentifier: String = {
         let fallbackGroup = "group.com.bluewolfy24yt.whisperorb"
         if let bundleId = Bundle.main.bundleIdentifier {
@@ -410,16 +645,34 @@ public final class AppGroupManager: ObservableObject {
         didSet { if !isApplyingRemoteUpdate && oldValue != selectedModel { persistAndBroadcastState() } }
     }
 
+    @Published public var selectedLanguage: WhisperLanguageSelection = .system {
+        didSet { if !isApplyingRemoteUpdate && oldValue != selectedLanguage { persistAndBroadcastState() } }
+    }
+
+    @Published public var simulateModest4GBDevice: Bool = false {
+        didSet {
+            if !isApplyingRemoteUpdate && oldValue != simulateModest4GBDevice {
+                if simulateModest4GBDevice && !HardwareDetector.isTierUnlocked(selectedModel, simulate4GB: true) {
+                    selectedModel = .normal
+                }
+                persistAndBroadcastState()
+            }
+        }
+    }
+
+    @Published public var recentEmojis: [String] = ["😂", "❤️", "🔥", "👍", "😭", "🙏", "✨", "😍", "🤣", "😎", "🥳", "🚀", "👀", "💯", "🫶", "🤔"] {
+        didSet {
+            userDefaults.set(recentEmojis, forKey: Keys.recentEmojisList)
+        }
+    }
+
     @Published public var orbState: WhisperOrbState = .idle {
         didSet { if !isApplyingRemoteUpdate && oldValue != orbState { persistAndBroadcastState() } }
     }
 
     @Published public var currentAudioLevel: Float = 0.0
-
     @Published public var pendingTranscribedText: String = ""
-
     @Published public var lastInsertedSentenceLength: Int = 0
-
     @Published public var shouldDeleteLastSentence: Bool = false
 
     @Published public var autoSpaceForGoodnotes: Bool = true {
@@ -442,7 +695,6 @@ public final class AppGroupManager: ObservableObject {
         didSet { if !isApplyingRemoteUpdate && oldValue != isKeyboardCollapsed { persistAndBroadcastState() } }
     }
 
-    // Callback déclenché dans l'application principale quand le clavier touche l'orbe
     public var onToggleRecordingRequested: (() -> Void)?
 
     // MARK: - Propriétés Internes
@@ -461,10 +713,8 @@ public final class AppGroupManager: ObservableObject {
         static let sharedPayloadData = "whisperorb.sharedPayloadData"
         static let liveAudioLevel = "whisperorb.liveAudioLevel"
         static let sharedFileName = "whisperorb_shared_state.json"
-        static let pasteboardStateType = "com.bluewolfy24yt.whisperorb.state.json"
+        static let recentEmojisList = "whisperorb.recentEmojisList"
     }
-
-    // MARK: - Initialisation (Sans Polling Permanent Énergivore)
 
     private init() {
         if let groupDefaults = UserDefaults(suiteName: Self.appGroupIdentifier) {
@@ -473,8 +723,13 @@ public final class AppGroupManager: ObservableObject {
             self.userDefaults = UserDefaults.standard
         }
 
+        if let savedEmojis = userDefaults.stringArray(forKey: Keys.recentEmojisList), !savedEmojis.isEmpty {
+            self.recentEmojis = savedEmojis
+        }
+
         if !userDefaults.bool(forKey: Keys.hasLaunchedBefore) {
             self.selectedModel = HardwareDetector.recommendedTier
+            self.selectedLanguage = .system
             userDefaults.set(true, forKey: Keys.hasLaunchedBefore)
             persistAndBroadcastState()
         } else {
@@ -490,7 +745,16 @@ public final class AppGroupManager: ObservableObject {
         CFNotificationCenterRemoveEveryObserver(center, Unmanaged.passUnretained(self).toOpaque())
     }
 
-    // MARK: - Répertoires Partagés (Conservation des Modèles Déjà Téléchargés lors des MAJ)
+    public func recordUsedEmoji(_ emoji: String) {
+        var current = recentEmojis.filter { $0 != emoji }
+        current.insert(emoji, at: 0)
+        if current.count > 32 {
+            current = Array(current.prefix(32))
+        }
+        recentEmojis = current
+    }
+
+    // MARK: - Répertoires Partagés
 
     public var sharedContainerURL: URL {
         if let groupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: Self.appGroupIdentifier) {
@@ -499,7 +763,6 @@ public final class AppGroupManager: ObservableObject {
         return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
     }
 
-    /// Conserve le dossier Documents/Models de l'application principale pour ne jamais perdre les modèles déjà téléchargés lors d'une MAJ
     public var modelsDirectoryURL: URL {
         let docsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         let docsModelsDir = docsURL.appendingPathComponent("Models", isDirectory: true)
@@ -519,7 +782,7 @@ public final class AppGroupManager: ObservableObject {
         sharedContainerURL.appendingPathComponent(Keys.sharedFileName, isDirectory: false)
     }
 
-    // MARK: - Sauvegarde et Diffusion Événementielle (Uniquement lors d'un Changement Réel)
+    // MARK: - Sauvegarde et Diffusion Événementielle
 
     public func persistAndBroadcastState(postDarwinNotification: Bool = true) {
         let now = Date().timeIntervalSince1970
@@ -529,6 +792,8 @@ public final class AppGroupManager: ObservableObject {
             bgHex: bgHex,
             fgHex: fgHex,
             selectedModelRaw: selectedModel.rawValue,
+            selectedLanguageRaw: selectedLanguage.rawValue,
+            simulateModest4GBDevice: simulateModest4GBDevice,
             orbStateRaw: orbState.rawValue,
             currentAudioLevel: currentAudioLevel,
             pendingTranscribedText: pendingTranscribedText,
@@ -545,10 +810,7 @@ public final class AppGroupManager: ObservableObject {
 
         guard let encoded = try? JSONEncoder().encode(payload) else { return }
 
-        // Canal 1A : UserDefaults(suiteName: group...) en mémoire rapide
         userDefaults.set(encoded, forKey: Keys.sharedPayloadData)
-
-        // Canal 1B : Fichier JSON dans le conteneur App Group
         try? encoded.write(to: sharedStateFileURL, options: [.atomic])
 
         if postDarwinNotification {
@@ -556,7 +818,6 @@ public final class AppGroupManager: ObservableObject {
         }
     }
 
-    /// Mise à jour ultra-légère (bridée à 8 Hz max, sans écriture disque SSD ni UIPasteboard) pour éviter toute chauffe
     public func updateLiveAudioLevel(_ level: Float) {
         let clamped = max(0.0, min(1.0, level))
         let now = Date().timeIntervalSince1970
@@ -591,19 +852,15 @@ public final class AppGroupManager: ObservableObject {
         }
     }
 
-    // MARK: - Lecture Multi-Canal Événementielle (Zéro Spam I/O)
-
     public func reloadStateFromChannels() {
         let decoder = JSONDecoder()
         var freshest: WhisperSharedStatePayload? = nil
 
-        // 1. Lecture prioritaire en RAM via UserDefaults App Group (zéro accès disque inutile)
         if let defaultsData = userDefaults.data(forKey: Keys.sharedPayloadData),
            let payload = try? decoder.decode(WhisperSharedStatePayload.self, from: defaultsData) {
             freshest = payload
         }
 
-        // 2. Lecture fichier JSON partagé si plus récent
         if let fileData = try? Data(contentsOf: sharedStateFileURL),
            let filePayload = try? decoder.decode(WhisperSharedStatePayload.self, from: fileData) {
             if let current = freshest {
@@ -649,6 +906,14 @@ public final class AppGroupManager: ObservableObject {
             if self.fgHex != validPayload.fgHex { self.fgHex = validPayload.fgHex }
             if let model = WhisperModelTier(rawValue: validPayload.selectedModelRaw), self.selectedModel != model {
                 self.selectedModel = model
+            }
+            if let langRaw = validPayload.selectedLanguageRaw,
+               let lang = WhisperLanguageSelection(rawValue: langRaw),
+               self.selectedLanguage != lang {
+                self.selectedLanguage = lang
+            }
+            if let sim4GB = validPayload.simulateModest4GBDevice, self.simulateModest4GBDevice != sim4GB {
+                self.simulateModest4GBDevice = sim4GB
             }
             if let state = WhisperOrbState(rawValue: validPayload.orbStateRaw), self.orbState != state {
                 self.orbState = state
@@ -696,8 +961,6 @@ public final class AppGroupManager: ObservableObject {
         onToggleRecordingRequested?()
     }
 
-    // MARK: - Actions Métier Clavier <-> Application
-
     public func requestToggleRecordingFromKeyboard() {
         toggleRecordingRequestCount += 1
         lastHandledToggleRequestCount = toggleRecordingRequestCount
@@ -716,7 +979,6 @@ public final class AppGroupManager: ObservableObject {
             formattedText = trimmed
         }
 
-        // Sur Mac, copie automatiquement chaque phrase dictée dans le Presse-Papier universel (⌘ + V direct)
         if HardwareDetector.isRunningOnMac {
             UIPasteboard.general.string = formattedText
         }
@@ -775,13 +1037,12 @@ public final class AppGroupManager: ObservableObject {
         return length
     }
 
-    // MARK: - Notifications Système Darwin (C-API Temps Réel • 0 % CPU au Repos)
+    // MARK: - Notifications Système Darwin
 
     private func registerDarwinNotificationObservers() {
         let center = CFNotificationCenterGetDarwinNotifyCenter()
         let observerPtr = Unmanaged.passUnretained(self).toOpaque()
 
-        // 1. Demande de démarrage/arrêt d'écoute venant du clavier
         CFNotificationCenterAddObserver(
             center,
             observerPtr,
@@ -798,7 +1059,6 @@ public final class AppGroupManager: ObservableObject {
             .deliverImmediately
         )
 
-        // 2. Mises à jour d'état (couleurs, texte transcrit, état de l'orbe)
         CFNotificationCenterAddObserver(
             center,
             observerPtr,
@@ -814,7 +1074,6 @@ public final class AppGroupManager: ObservableObject {
             .deliverImmediately
         )
 
-        // 3. Niveau audio en direct pendant l'écoute (sans écriture disque)
         CFNotificationCenterAddObserver(
             center,
             observerPtr,
@@ -839,8 +1098,6 @@ public final class AppGroupManager: ObservableObject {
             true
         )
     }
-
-    // MARK: - Synchronisation Légère Uniquement Quand le Clavier est Ouvert
 
     public func startFastPolling() {
         pollingTimer?.invalidate()

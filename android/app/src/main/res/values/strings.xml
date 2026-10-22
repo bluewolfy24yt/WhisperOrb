@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">WhisperOrb</string>
+    <string name="accessibility_service_label">WhisperOrb — Orbe sur Clavier par Défaut</string>
+    <string name="accessibility_service_description">Affiche l\'Orbe 3D WhisperOrb au-dessus de votre clavier Android par défaut (Gboard) lors de la saisie de texte, se masque automatiquement sur les claviers de chiffres, et insère la dictée hors-ligne directement au curseur.</string>
+</resources>

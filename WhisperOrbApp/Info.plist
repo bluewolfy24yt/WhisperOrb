@@ -17,13 +17,13 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
+    <string>2.0.0</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>2</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>WhisperOrb utilise les microphones studio de l'iPad uniquement en local (100 % hors-ligne) pour transcrire votre voix en texte sans faute pendant vos devoirs.</string>
+    <string>WhisperOrb utilise le microphone uniquement en local (100 % hors-ligne sur votre appareil) pour transcrire votre voix en texte instantanément.</string>
     <key>BGTaskSchedulerPermittedIdentifiers</key>
     <array>
         <string>com.bluewolfy24yt.whisperorb.processing</string>

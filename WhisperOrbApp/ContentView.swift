@@ -8,12 +8,17 @@ public struct ContentView: View {
     @EnvironmentObject private var modelDownloader: ModelDownloader
     @EnvironmentObject private var whisperEngine: WhisperEngine
     @EnvironmentObject private var networkMonitor: NetworkMonitor
+    @ObservedObject private var styleMemory = UserStyleMemoryManager.shared
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var colorSearchText: String = ""
     @State private var showCopiedToast: Bool = false
     @State private var showRepoCopiedToast: Bool = false
+    @State private var showJSONCopiedToast: Bool = false
+    @State private var newSpokenPhrase: String = ""
+    @State private var newWrittenReplacement: String = ""
+    @State private var showRawJSONPreview: Bool = false
 
     private let githubRepoURLString = "https://github.com/bluewolfy24yt/WhisperOrb"
     private let githubReleasesURLString = "https://github.com/bluewolfy24yt/WhisperOrb/releases/latest"
@@ -40,20 +45,18 @@ public struct ContentView: View {
 
     public var body: some View {
         ZStack {
-            // Fond noir sobre style Apple Pro
             Color(hex: "#09090B")
                 .ignoresSafeArea()
 
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 18) {
-                    // En-tête sobre et épuré (sans bandeau réseau/DST)
                     soberAppHeaderSection
 
-                    // Disposition adaptative : 2 colonnes sur iPad & Mac / 1 colonne sur iPhone
                     if horizontalSizeClass == .regular {
                         HStack(alignment: .top, spacing: 18) {
                             VStack(spacing: 18) {
                                 card1VoiceStudioSection
+                                cardStyleMemorySection
                                 card4PreferencesAndVoiceCommands
                                 card5GitHubAndSetupSection
                             }
@@ -69,6 +72,7 @@ public struct ContentView: View {
                         VStack(spacing: 18) {
                             card1VoiceStudioSection
                             card2ModelsSection
+                            cardStyleMemorySection
                             card3AppearanceStudioSection
                             card4PreferencesAndVoiceCommands
                             card5GitHubAndSetupSection
@@ -81,7 +85,7 @@ public struct ContentView: View {
         }
     }
 
-    // MARK: - En-tête Sobre & Grand Public (iPhone, iPad & Mac)
+    // MARK: - En-tête Sobre & Grand Public (v2.0.0)
 
     private var soberAppHeaderSection: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -91,12 +95,12 @@ public struct ContentView: View {
                         .font(.system(size: 24, weight: .bold))
                         .foregroundColor(.white)
 
-                    Text("ON-DEVICE AI")
+                    Text("v2.0 • ON-DEVICE AI")
                         .font(.system(size: 10, weight: .bold, design: .monospaced))
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
                         .background(Capsule().fill(Color.white.opacity(0.08)))
-                        .foregroundColor(Color.white.opacity(0.70))
+                        .foregroundColor(Color.white.opacity(0.75))
                 }
 
                 Text(HardwareDetector.telemetrySummary)
@@ -122,7 +126,7 @@ public struct ContentView: View {
         .padding(.top, 4)
     }
 
-    // MARK: - Section 1 : Studio Vocal & Écoute en Arrière-Plan
+    // MARK: - Section 1 : Studio Vocal, Langue & Écoute en Arrière-Plan
 
     private var card1VoiceStudioSection: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -132,7 +136,6 @@ public struct ContentView: View {
                 subtitle: "Touchez l'orbe pour dicter ou activez le moteur en arrière-plan pour le clavier"
             )
 
-            // Scène centrale de l'Orbe 3D
             VStack(spacing: 12) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -162,14 +165,45 @@ public struct ContentView: View {
                             Circle()
                                 .fill(statusColorForOrbState(appGroup.orbState))
                                 .frame(width: 7, height: 7)
-                            Text("\(appGroup.orbState.statusTitle) — Touchez l'orbe pour parler")
+                            Text("\(appGroup.orbState.statusTitle) • \(appGroup.selectedLanguage.shortPillLabel)")
                                 .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(Color.white.opacity(0.72))
+                                .foregroundColor(Color.white.opacity(0.75))
                         }
                     }
                 }
 
-                // Mode Clavier Réduit + Badge Optique
+                // Sélecteur intelligent de langue multilingue
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Label("Langue de dictée Whisper", systemImage: "globe")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(Color.white.opacity(0.80))
+                        Spacer()
+                        Text("Code ISO : \(appGroup.selectedLanguage.resolvedWhisperCode.uppercased())")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundColor(Color(hex: "#0A84FF"))
+                    }
+
+                    Picker("Langue de dictée", selection: $appGroup.selectedLanguage) {
+                        ForEach(WhisperLanguageSelection.allCases) { lang in
+                            Text("\(lang.flagEmoji) \(lang.displayName)").tag(lang)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color(hex: "#0D0D11"))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                            )
+                    )
+                }
+
                 HStack {
                     Toggle(isOn: $appGroup.isKeyboardCollapsed) {
                         Text("Mode clavier réduit (Barre vocale seule)")
@@ -180,7 +214,6 @@ public struct ContentView: View {
                 }
             }
 
-            // Bouton d'activation du moteur en arrière-plan
             Button(action: {
                 let generator = UIImpactFeedbackGenerator(style: .medium)
                 generator.impactOccurred()
@@ -240,7 +273,6 @@ public struct ContentView: View {
                 .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.04)))
             }
 
-            // Zone d'essai de dictée
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("Aperçu de dictée")
@@ -325,15 +357,32 @@ public struct ContentView: View {
         .background(cardBackgroundSurface)
     }
 
-    // MARK: - Section 2 : Modèles Whisper Hors-Ligne (GPU Metal + FlashAttention)
+    // MARK: - Section 2 : Les 7 Modèles Whisper Hors-Ligne + Sécurité Matérielle RAM
 
     private var card2ModelsSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        let unlockedCount = HardwareDetector.unlockedTiers(simulate4GB: appGroup.simulateModest4GBDevice).count
+
+        return VStack(alignment: .leading, spacing: 14) {
             cardSectionHeader(
                 icon: "cpu",
-                title: "Modèles IA Hors-Ligne",
-                subtitle: "Accélération GPU Metal + FlashAttention (\(whisperEngine.optimalThreadCount) cœurs Performance)"
+                title: "Catalogue des 7 Modèles Whisper",
+                subtitle: "GPU Metal + FlashAttention • \(unlockedCount)/7 modèles débloqués sur votre appareil"
             )
+
+            // Switch de test matériel (Simuler un téléphone 4 Go RAM)
+            Toggle(isOn: $appGroup.simulateModest4GBDevice) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("🧪 Simuler un téléphone modeste (4 Go RAM)")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.white)
+                    Text("Permet de tester le verrouillage automatique des modèles lourds")
+                        .font(.system(size: 11))
+                        .foregroundColor(Color.white.opacity(0.55))
+                }
+            }
+            .toggleStyle(SwitchToggleStyle(tint: Color(hex: "#FF9F0A")))
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color(hex: "#0D0D11")))
 
             if let dlError = modelDownloader.errorMessage {
                 HStack(spacing: 8) {
@@ -359,11 +408,12 @@ public struct ContentView: View {
     }
 
     private func modelTierCardView(for tier: WhisperModelTier) -> some View {
+        let isUnlocked = HardwareDetector.isTierUnlocked(tier, simulate4GB: appGroup.simulateModest4GBDevice)
         let isSelected = (appGroup.selectedModel == tier)
         let isDownloaded = modelDownloader.downloadedModels.contains(tier)
         let isDownloading = modelDownloader.activeDownloads.contains(tier)
         let progress = modelDownloader.downloadProgress[tier] ?? 0.0
-        let isRecommended = (HardwareDetector.recommendedTier == tier)
+        let isRecommended = (HardwareDetector.recommendedTier(simulate4GB: appGroup.simulateModest4GBDevice) == tier)
 
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top) {
@@ -371,9 +421,9 @@ public struct ContentView: View {
                     HStack(spacing: 8) {
                         Text(tier.displayName)
                             .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(.white)
+                            .foregroundColor(isUnlocked ? .white : Color.white.opacity(0.45))
 
-                        if isRecommended {
+                        if isRecommended && isUnlocked {
                             Text("Recommandé")
                                 .font(.system(size: 10, weight: .semibold))
                                 .padding(.horizontal, 7)
@@ -385,12 +435,19 @@ public struct ContentView: View {
 
                     Text(tier.subtitle)
                         .font(.system(size: 12, weight: .regular))
-                        .foregroundColor(Color.white.opacity(0.60))
+                        .foregroundColor(Color.white.opacity(isUnlocked ? 0.60 : 0.38))
                 }
 
                 Spacer()
 
-                if isDownloaded {
+                if !isUnlocked {
+                    Text("🔒 \(tier.requiredRAMBadgeText)")
+                        .font(.system(size: 10, weight: .bold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Color(hex: "#FF9F0A").opacity(0.16)))
+                        .foregroundColor(Color(hex: "#FF9F0A"))
+                } else if isDownloaded {
                     Text("Téléchargé")
                         .font(.system(size: 11, weight: .medium))
                         .padding(.horizontal, 8)
@@ -406,7 +463,7 @@ public struct ContentView: View {
                 Label(tier.latencyDescription, systemImage: "bolt")
             }
             .font(.system(size: 11, weight: .regular, design: .monospaced))
-            .foregroundColor(Color.white.opacity(0.55))
+            .foregroundColor(Color.white.opacity(isUnlocked ? 0.55 : 0.35))
 
             if isDownloading {
                 VStack(alignment: .leading, spacing: 6) {
@@ -427,7 +484,11 @@ public struct ContentView: View {
             }
 
             HStack(spacing: 10) {
-                if isDownloaded {
+                if !isUnlocked {
+                    Text("Verrouillé par sécurité matérielle (nécessite \(tier.requiredRAMBadgeText))")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(Color.white.opacity(0.45))
+                } else if isDownloaded {
                     Button(action: {
                         appGroup.selectedModel = tier
                         whisperEngine.loadModel(tier)
@@ -490,11 +551,166 @@ public struct ContentView: View {
                 .overlay(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .strokeBorder(
-                            isSelected ? Color(hex: "#0A84FF").opacity(0.65) : Color.white.opacity(0.06),
+                            isSelected && isUnlocked ? Color(hex: "#0A84FF").opacity(0.65) : Color.white.opacity(0.06),
                             lineWidth: 1.0
                         )
                 )
         )
+    }
+
+    // MARK: - Section Mémoire d'Écriture JSON (user_style_memory.json)
+
+    private var cardStyleMemorySection: some View {
+        let activeLangCode = appGroup.selectedLanguage.effectiveStyleLanguageCode
+        let entries = styleMemory.replacements(for: activeLangCode)
+
+        return VStack(alignment: .leading, spacing: 14) {
+            cardSectionHeader(
+                icon: "brain.head.profile",
+                title: "Mémoire d'Écriture (user_style_memory.json)",
+                subtitle: "Adapte les abréviations et la ponctuation à votre façon d'écrire (\(activeLangCode.uppercased()))"
+            )
+
+            Toggle(isOn: $styleMemory.isMemoryEnabled) {
+                Text("Activer le profil user_style_memory.json")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.white)
+            }
+            .toggleStyle(SwitchToggleStyle(tint: Color(hex: "#30D158")))
+
+            Toggle(isOn: $styleMemory.memory.stripTrailingPeriodOnShortMessages) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Retirer le point final sur les petits messages")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.white)
+                    Text("Évite le '.' automatique sur les SMS de ≤ \(styleMemory.memory.shortMessageMaxWords) mots")
+                        .font(.system(size: 11))
+                        .foregroundColor(Color.white.opacity(0.55))
+                }
+            }
+            .toggleStyle(SwitchToggleStyle(tint: Color(hex: "#0A84FF")))
+
+            // Ajout d'une nouvelle abréviation pour la langue active
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Abréviations personnelles (\(activeLangCode.uppercased()))")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(Color.white.opacity(0.75))
+
+                HStack(spacing: 8) {
+                    TextField("Mot dicté (ex: t'inquiète)", text: $newSpokenPhrase)
+                        .font(.system(size: 12))
+                        .foregroundColor(.white)
+                        .padding(9)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color(hex: "#0D0D11")))
+
+                    Text("→")
+                        .foregroundColor(Color.white.opacity(0.5))
+
+                    TextField("Écrit (ex: tkt)", text: $newWrittenReplacement)
+                        .font(.system(size: 12))
+                        .foregroundColor(.white)
+                        .padding(9)
+                        .frame(maxWidth: 110)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color(hex: "#0D0D11")))
+
+                    Button(action: {
+                        styleMemory.setReplacement(
+                            spoken: newSpokenPhrase,
+                            written: newWrittenReplacement,
+                            for: activeLangCode
+                        )
+                        newSpokenPhrase = ""
+                        newWrittenReplacement = ""
+                    }) {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundColor(Color(hex: "#0A84FF"))
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(entries, id: \.spoken) { item in
+                            HStack(spacing: 6) {
+                                Text("« \(item.spoken) » → \(item.written)")
+                                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                    .foregroundColor(.white)
+
+                                Button(action: {
+                                    styleMemory.removeReplacement(spoken: item.spoken, for: activeLangCode)
+                                }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(Color.white.opacity(0.45))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(Color(hex: "#0D0D11")))
+                        }
+                    }
+                }
+            }
+
+            HStack(spacing: 8) {
+                Button(action: {
+                    withAnimation {
+                        showRawJSONPreview.toggle()
+                    }
+                }) {
+                    Label(showRawJSONPreview ? "Masquer JSON" : "Voir JSON", systemImage: "curlybraces")
+                        .font(.system(size: 11, weight: .medium))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.07)))
+                        .foregroundColor(.white)
+                }
+                .buttonStyle(.plain)
+
+                Button(action: {
+                    UIPasteboard.general.string = styleMemory.prettyJSONString()
+                    showJSONCopiedToast = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                        showJSONCopiedToast = false
+                    }
+                }) {
+                    Label(showJSONCopiedToast ? "JSON copié" : "Exporter JSON", systemImage: "doc.on.doc")
+                        .font(.system(size: 11, weight: .medium))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.07)))
+                        .foregroundColor(.white)
+                }
+                .buttonStyle(.plain)
+
+                Spacer()
+
+                Button(action: {
+                    styleMemory.resetToDefaults()
+                }) {
+                    Text("Réinitialiser")
+                        .font(.system(size: 11, weight: .medium))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.07)))
+                        .foregroundColor(Color.white.opacity(0.65))
+                }
+                .buttonStyle(.plain)
+            }
+
+            if showRawJSONPreview {
+                Text(styleMemory.prettyJSONString())
+                    .font(.system(size: 10, weight: .regular, design: .monospaced))
+                    .foregroundColor(Color(hex: "#30D158"))
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Color(hex: "#0D0D11")))
+            }
+        }
+        .padding(18)
+        .background(cardBackgroundSurface)
     }
 
     // MARK: - Section 3 : Apparence de l'Orbe
@@ -507,7 +723,6 @@ public struct ContentView: View {
                 subtitle: "Couleur de l'onde, fond de la sphère et thèmes spéciaux"
             )
 
-            // Fond de la sphère
             VStack(alignment: .leading, spacing: 8) {
                 Text("Fond de la sphère")
                     .font(.system(size: 12, weight: .medium))
@@ -548,7 +763,6 @@ public struct ContentView: View {
 
             Divider().background(Color.white.opacity(0.08))
 
-            // Onde lumineuse
             VStack(alignment: .leading, spacing: 10) {
                 Text("Couleur de l'onde")
                     .font(.system(size: 12, weight: .medium))
@@ -628,7 +842,6 @@ public struct ContentView: View {
 
             Divider().background(Color.white.opacity(0.08))
 
-            // Recherche par nom ou code hexadécimal
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
@@ -751,14 +964,14 @@ public struct ContentView: View {
             Divider().background(Color.white.opacity(0.08))
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Commandes vocales disponibles")
+                Text("Commandes vocales disponibles (FR / EN)")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(Color.white.opacity(0.70))
 
-                voiceCommandRow(spoken: "« À la ligne » / « Nouveau paragraphe »", result: "Saut de ligne")
-                voiceCommandRow(spoken: "« Effacer la dernière phrase »", result: "Annule la dernière dictée")
-                voiceCommandRow(spoken: "« Point d'interrogation » / « Point d'exclamation »", result: "Insère ? ou !")
-                voiceCommandRow(spoken: "« Ouvrir les guillemets » / « Fermer les guillemets »", result: "Insère « et »")
+                voiceCommandRow(spoken: "« À la ligne » / « New line »", result: "Saut de ligne")
+                voiceCommandRow(spoken: "« Effacer la dernière phrase » / « Delete last sentence »", result: "Annule la dictée")
+                voiceCommandRow(spoken: "« Point d'interrogation » / « Question mark »", result: "Insère ?")
+                voiceCommandRow(spoken: "« Point d'exclamation » / « Exclamation mark »", result: "Insère !")
             }
         }
         .padding(18)
@@ -786,8 +999,8 @@ public struct ContentView: View {
         VStack(alignment: .leading, spacing: 14) {
             cardSectionHeader(
                 icon: "qrcode",
-                title: "Partage & Installation",
-                subtitle: "Compatible avec tous les iPhone, iPad et Mac (Apple Silicon)"
+                title: "Partage & Installation (v2.0.0)",
+                subtitle: "Disponible pour Apple (iPhone, iPad, Mac) et Android (.apk)"
             )
 
             HStack(alignment: .center, spacing: 16) {
@@ -802,7 +1015,7 @@ public struct ContentView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Releases GitHub (.ipa)")
+                    Text("Releases GitHub v2.0.0 (.ipa & .apk)")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(.white)
 
@@ -846,8 +1059,6 @@ public struct ContentView: View {
         .background(cardBackgroundSurface)
     }
 
-    // MARK: - Générateur Natif CoreImage de QR Code
-
     private func generateHighContrastQRCode(from string: String) -> UIImage? {
         let context = CIContext()
         let filter = CIFilter.qrCodeGenerator()
@@ -859,8 +1070,6 @@ public struct ContentView: View {
         guard let cgImage = context.createCGImage(scaledImage, from: scaledImage.extent) else { return nil }
         return UIImage(cgImage: cgImage)
     }
-
-    // MARK: - Composants Visuels Sobres
 
     private var cardBackgroundSurface: some View {
         RoundedRectangle(cornerRadius: 18, style: .continuous)
