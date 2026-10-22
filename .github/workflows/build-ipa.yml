@@ -1,4 +1,4 @@
-name: Build & Release WhisperOrb v2.0.0 (.ipa & .apk)
+name: Build & Release WhisperOrb v2.1.0 (.ipa & .apk)
 
 on:
   push:
@@ -51,33 +51,25 @@ jobs:
           path: WhisperOrb-Android.apk
           if-no-files-found: error
 
-      - name: 7. Publish Android APK to GitHub Release v2.0.0
+      - name: 7. Publish Android APK to GitHub Release v2.1.0
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.0.0
-          name: "WhisperOrb v2.0.0 — Apple (.ipa) & Android (.apk)"
+          tag_name: v2.1.0
+          name: "WhisperOrb v2.1.0 — Parité 1:1 Apple (.ipa) & Android Gboard (.apk)"
           body: |
-            ## 🫧 WhisperOrb `v2.0.0` — 100% On-Device Offline AI Voice Dictation & Native Keyboard (Apple & Android)
+            ## 🫧 WhisperOrb `v2.1.0` — Parité 1:1 Apple & Android + Incrustation Gboard 3-États + Easter Egg 7 Niveaux
 
-            ### 🇬🇧 Quick Download & Setup
-            - 🤖 **Android, Tablets, Chromebook Plus & Googlebook 14 (`WhisperOrb-Android.apk` — `arm64-v8a` + `x86_64` AVX2)**:
-              1. Install `WhisperOrb-Android.apk` and open **WhisperOrb** (Cosmic Dark Pro UI with automatic 2-column layout on Android Tablets & Googlebook 14).
-              2. Download your preferred Whisper model (from **Whisper Nano 31 MB** up to **Whisper TITAN Large-v3 1.08 GB** on 12 GB+ RAM devices like the **Pixel 9 Pro XL** or **Googlebook 14**).
-              3. Enable and select the **WhisperOrb Native Keyboard (`InputMethodService`)** in 2 taps: features the **120 Hz 3D Orb literally embedded inside the keyboard**, the **`▾ Réduire` collapsible 58dp voice bar**, **Smart AI Autocorrect & 3-Suggestion Bar**, **Full 9-Category Emoji Picker**, and **automatic pure numeric keypad mode** on number/PIN fields!
-            - 🍎 **Apple iOS / iPadOS / macOS (`WhisperOrb-iPad.ipa`)**:
-              1. Install via **SideStore**, **AltStore**, **Sideloadly**, or `isideload`.
-              2. Download a model and enable the **WhisperOrb Keyboard** (featuring the embedded 3D Orb, `▾ Réduire` collapsible voice bar, **Smart AI Autocorrect & 3-Suggestion Bar**, full 9-category Apple Emoji Picker, accents, and `user_style_memory.json`).
-
-            ---
-
-            ### 🇫🇷 Téléchargement & Installation Rapide
-            - 🤖 **Android, Tablettes, Chromebook Plus & Googlebook 14 (`WhisperOrb-Android.apk` — `arm64-v8a` + `x86_64` AVX2)** :
-              1. Installez `WhisperOrb-Android.apk` et ouvrez **WhisperOrb** (nouvelle interface **Cosmic Dark Pro** avec mode 2 colonnes automatique sur Tablettes Android & Googlebook 14).
-              2. Téléchargez l'un des **7 modèles Whisper** (de **Whisper Nano 31 Mo** jusqu'à **Whisper TITAN Large-v3 1,08 Go** sur les appareils 12 Go+ RAM comme le **Pixel 9 Pro XL** ou le **Googlebook 14**).
-              3. Activez en 2 touches le **Clavier Natif WhisperOrb (`InputMethodService`)** : **Orbe 3D littéralement incrusté dans le clavier**, bouton **`▾ Réduire`** (barre vocale compacte de 58dp), **Correcteur Automatique IA & Barre de 3 prédictions**, **9 catégories d'émojis**, et **basculement automatique en clavier de chiffres pur** (sans Orbe) sur les champs numériques !
-            - 🍎 **Apple iOS / iPadOS / macOS (`WhisperOrb-iPad.ipa`)** :
-              1. Installez l'IPA via **SideStore**, **AltStore** ou **Sideloadly**.
-              2. Téléchargez un modèle et activez le clavier WhisperOrb complet (avec l'Orbe 3D incrusté, le bouton `▾ Réduire`, le **Correcteur Automatique IA & Barre de 3 prédictions**, tous les émojis Apple, accents et mémoire `user_style_memory.json`).
+            ### 🇫🇷 Nouveautés Majeures (`v2.1.0`)
+            - 🤖 **Android (`WhisperOrb-Android.apk` — Jetpack Compose + Material 3)** :
+              1. **Clone visuel et fonctionnel 1:1 de l'application Apple (`ContentView.swift`)** : les 6 cartes complètes, mode 2 colonnes automatique sur Tablettes & Googlebook 14, sélecteur de 32 couleurs + recherche de 140+ teintes FR/EN, ColorPickers RGB/Hex, curseur de silence VAD, mémoire `user_style_memory.json` et vrai QR Code.
+              2. **Vrai Clavier Gboard conservé + Incrustation 3-États (`WhisperOrbAccessibilityService`)** :
+                 - **État 1 (Gboard ouvert)** : bandeau vocal sombre style Apple verrouillé au pixel près juste au-dessus du sommet de Gboard (`imeRect.top - barHeight`), avec masquage automatique sur les claviers de chiffres/téléphone.
+                 - **État 2 (Panneau `⚙` DANS la zone de Gboard)** : toucher `⚙` (ou maintenir l'Orbe) remplace les touches de Gboard par le panneau de réglages rapides WhisperOrb (Langues, 7 Modèles IA, 32 Couleurs d'Orbe).
+                 - **État 3 (Rétractation physique `▾ Réduire`)** : toucher `▾ Réduire` rétracte physiquement Gboard et laisse uniquement la barre vocale compacte en bas de l'écran (avec `▴ Clavier` pour ré-ouvrir Gboard).
+              3. **Conservation garantie des modèles téléchargés** : signature cryptographique permanente (`whisperorb-release.p12`) + stockage persistant dans `/sdcard/Android/media/com.whisperorb.app/Models/`.
+            - 🔓 **Déblocage jusqu'à `Whisper Expert (v3 Turbo)` dès 4 Go RAM + Easter Egg des 7 Messages (Apple & Android, FR/EN)** :
+              - Les appareils 4 Go RAM débloquent désormais les 5 premiers modèles jusqu'à **🚀 Whisper Expert (v3 Turbo)**.
+              - Cliquer sur **« Débloquer »** lance l'Easter Egg progressif des **7 avertissements FR/EN** pour débloquer de force `Expert+ Q8` et `TITAN (1,08 Go)`.
           files: WhisperOrb-Android.apk
           draft: false
           prerelease: false
@@ -141,11 +133,11 @@ jobs:
           path: WhisperOrb-iPad.ipa
           if-no-files-found: error
 
-      - name: 8. Publish Apple IPA to GitHub Release v2.0.0
+      - name: 8. Publish Apple IPA to GitHub Release v2.1.0
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.0.0
-          name: "WhisperOrb v2.0.0 — Apple (.ipa) & Android (.apk)"
+          tag_name: v2.1.0
+          name: "WhisperOrb v2.1.0 — Parité 1:1 Apple (.ipa) & Android Gboard (.apk)"
           files: WhisperOrb-iPad.ipa
           draft: false
           prerelease: false
