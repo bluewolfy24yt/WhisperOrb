@@ -71,16 +71,12 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
     private lateinit var engine: WhisperAndroidEngine
     private lateinit var downloader: ModelDownloader
 
-    // Coordonnées écran réelles (getBoundsInScreen / getLocationOnScreen) de Gboard
+    // Coordonnées écran réelles (getBoundsInScreen) de Gboard dans le référentiel physique [0..realScreenHeight]
     private var isImeWindowVisible: Boolean = false
     private var currentImeTopScreenY: Int = 0
     private var currentImeBottomScreenY: Int = 0
     private var lastKnownImeTopScreenY: Int = 0
     private var lastKnownImeBottomScreenY: Int = 0
-
-    // Décalage éventuel du parent WindowManager (ex: statusBar / cutout), auto-calibré par getLocationOnScreen
-    private var parentScreenOffsetY: Int = 0
-    private var lastAppliedTargetScreenTopY: Int = -1
 
     // États des 3 modes d'incrustation Gboard
     private var isNumericFieldFocused: Boolean = false
@@ -1110,13 +1106,12 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
             x = 0
-            y = targetTopScreenY - parentScreenOffsetY
+            y = targetTopScreenY
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 layoutInDisplayCutoutMode =
                     WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
@@ -1130,8 +1125,10 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
             wm.addView(root, lp)
             overlayLayoutParams = lp
             isOverlayAttached = true
-            lastAppliedTargetScreenTopY = targetTopScreenY
-            calibrateScreenLocationOnPost()
+            android.util.Log.i(
+                "WhisperOrbGboard",
+                "Attached overlay: topY=$targetTopScreenY, h=$targetHeight, imeTop=$currentImeTopScreenY, imeBottom=$currentImeBottomScreenY"
+            )
         } catch (_: Exception) {
         }
     }
@@ -1143,45 +1140,17 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
         val lp = overlayLayoutParams ?: return
 
         val (targetTopScreenY, targetHeight) = computeDesiredScreenTopAndHeight()
-        val desiredLpY = targetTopScreenY - parentScreenOffsetY
-        lastAppliedTargetScreenTopY = targetTopScreenY
 
-        if (lp.y != desiredLpY || lp.height != targetHeight) {
-            lp.y = desiredLpY
+        if (lp.y != targetTopScreenY || lp.height != targetHeight) {
+            lp.y = targetTopScreenY
             lp.height = targetHeight
             try {
                 wm.updateViewLayout(root, lp)
+                android.util.Log.i(
+                    "WhisperOrbGboard",
+                    "Updated overlay: topY=$targetTopScreenY, h=$targetHeight, imeTop=$currentImeTopScreenY, imeBottom=$currentImeBottomScreenY"
+                )
             } catch (_: Exception) {
-            }
-        }
-        calibrateScreenLocationOnPost()
-    }
-
-    /**
-     * Auto-calibration par getLocationOnScreen() :
-     * Compare la coordonnée Y réelle sur l'écran physique de notre barre avec targetTopScreenY
-     * (toutes deux dans le référentiel global [0..ScreenHeight]) et corrige tout décalage de statusBar/cutout au pixel près.
-     */
-    private fun calibrateScreenLocationOnPost() {
-        val root = rootOverlayContainer ?: return
-        root.post {
-            if (!isOverlayAttached) return@post
-            val wm = windowManager ?: return@post
-            val lp = overlayLayoutParams ?: return@post
-            val loc = IntArray(2)
-            root.getLocationOnScreen(loc)
-            val actualScreenTopY = loc[1]
-            val targetTopY = lastAppliedTargetScreenTopY
-            if (targetTopY > 0 && actualScreenTopY > 0) {
-                val errorPx = actualScreenTopY - targetTopY
-                if (abs(errorPx) > 1) {
-                    parentScreenOffsetY += errorPx
-                    lp.y = targetTopY - parentScreenOffsetY
-                    try {
-                        wm.updateViewLayout(root, lp)
-                    } catch (_: Exception) {
-                    }
-                }
             }
         }
     }
