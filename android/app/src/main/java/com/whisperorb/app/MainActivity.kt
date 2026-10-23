@@ -14,6 +14,7 @@ import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.provider.Settings
+import android.view.inputmethod.InputMethodManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -97,9 +98,13 @@ import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
 
+    private var lifecycleRefreshTick by mutableIntStateOf(0)
+
     private val micPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { _ -> }
+    ) { _ ->
+        lifecycleRefreshTick++
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -128,14 +133,23 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             WhisperOrbTheme {
-                WhisperOrbContentView()
+                WhisperOrbContentView(lifecycleRefreshTick = lifecycleRefreshTick)
             }
         }
     }
 
     override fun onResume() {
         super.onResume()
+        lifecycleRefreshTick++
         WhisperOrbAccessibilityService.requestRefresh()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            lifecycleRefreshTick++
+            WhisperOrbAccessibilityService.requestRefresh()
+        }
     }
 }
 
@@ -163,7 +177,7 @@ fun WhisperOrbTheme(content: @Composable () -> Unit) {
 }
 
 @Composable
-fun WhisperOrbContentView() {
+fun WhisperOrbContentView(lifecycleRefreshTick: Int = 0) {
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
     val isLargeScreen = configuration.screenWidthDp >= 680 || HardwareDetector.isTabletOrLargeScreen(context)
@@ -193,19 +207,27 @@ fun WhisperOrbContentView() {
         }
     }
 
-    // Rafraîchissement périodique léger pour détecter l'activation du service Gboard
+    // Rafraîchissement périodique léger pour détecter l'activation/sélection du clavier ou de la bulle
     LaunchedEffect(Unit) {
         while (true) {
-            delay(1200L)
+            delay(900L)
             uiTick++
         }
     }
 
-    // Lecture réactive liée à uiTick
-    val currentTick = uiTick
-    val isGboardServiceActive = remember(currentTick) {
+    // Lecture réactive liée à uiTick et lifecycleRefreshTick
+    val currentTick = uiTick + lifecycleRefreshTick
+    val isKeyboardEnabled = remember(currentTick) {
+        WhisperAndroidEngine.isWhisperOrbKeyboardEnabled(context)
+    }
+    val isKeyboardSelected = remember(currentTick) {
+        WhisperAndroidEngine.isWhisperOrbKeyboardSelected(context)
+    }
+    val isAccessibilityServiceActive = remember(currentTick) {
         WhisperOrbAccessibilityService.isServiceEnabled(context)
     }
+    val isHeaderReady = (isKeyboardEnabled && isKeyboardSelected && engine.isGboardBarEnabled) ||
+        (isAccessibilityServiceActive && engine.isFloatingBubbleEnabled)
 
     Box(
         modifier = Modifier
@@ -221,7 +243,7 @@ fun WhisperOrbContentView() {
         ) {
             SoberAppHeaderSection(
                 context = context,
-                isServiceActive = isGboardServiceActive && engine.isGboardBarEnabled
+                isServiceActive = isHeaderReady
             )
 
             if (isLargeScreen) {
@@ -237,7 +259,9 @@ fun WhisperOrbContentView() {
                         Card1VoiceStudioSection(
                             context = context,
                             engine = engine,
-                            isServiceActive = isGboardServiceActive,
+                            isKeyboardEnabled = isKeyboardEnabled,
+                            isKeyboardSelected = isKeyboardSelected,
+                            isAccessibilityServiceActive = isAccessibilityServiceActive,
                             showCopiedToast = showCopiedToast,
                             onShowCopiedToast = { showCopiedToast = it },
                             numericTestValue = numericTestValue,
@@ -264,7 +288,7 @@ fun WhisperOrbContentView() {
                         )
                         Card5GitHubAndSetupSection(
                             context = context,
-                            isServiceActive = isGboardServiceActive,
+                            isServiceActive = isKeyboardEnabled && isKeyboardSelected,
                             showRepoCopiedToast = showRepoCopiedToast,
                             onShowRepoCopied = { showRepoCopiedToast = it }
                         )
@@ -298,7 +322,9 @@ fun WhisperOrbContentView() {
                     Card1VoiceStudioSection(
                         context = context,
                         engine = engine,
-                        isServiceActive = isGboardServiceActive,
+                        isKeyboardEnabled = isKeyboardEnabled,
+                        isKeyboardSelected = isKeyboardSelected,
+                        isAccessibilityServiceActive = isAccessibilityServiceActive,
                         showCopiedToast = showCopiedToast,
                         onShowCopiedToast = { showCopiedToast = it },
                         numericTestValue = numericTestValue,
@@ -339,7 +365,7 @@ fun WhisperOrbContentView() {
                     )
                     Card5GitHubAndSetupSection(
                         context = context,
-                        isServiceActive = isGboardServiceActive,
+                        isServiceActive = isKeyboardEnabled && isKeyboardSelected,
                         showRepoCopiedToast = showRepoCopiedToast,
                         onShowRepoCopied = { showRepoCopiedToast = it }
                     )
@@ -460,13 +486,15 @@ private fun SoberAppHeaderSection(
     }
 }
 
-// MARK: - Carte 1 : Studio Vocal, Langue & Incrustation Gboard 3-États
+// MARK: - Carte 1 : Studio Vocal, Clavier Gboard Intégré & Bandeau Vocal Incrusté
 
 @Composable
 private fun Card1VoiceStudioSection(
     context: Context,
     engine: WhisperAndroidEngine,
-    isServiceActive: Boolean,
+    isKeyboardEnabled: Boolean,
+    isKeyboardSelected: Boolean,
+    isAccessibilityServiceActive: Boolean,
     showCopiedToast: Boolean,
     onShowCopiedToast: (Boolean) -> Unit,
     numericTestValue: String,
@@ -474,12 +502,13 @@ private fun Card1VoiceStudioSection(
     onForceRefresh: () -> Unit
 ) {
     var langMenuExpanded by remember { mutableStateOf(false) }
+    var floatingBubbleSectionExpanded by remember { mutableStateOf(engine.isFloatingBubbleEnabled) }
 
     AppleCardSurface {
         CardSectionHeader(
             iconText = "〰",
-            title = "Studio Vocal",
-            subtitle = "Touchez l'orbe pour dicter ou activez le bandeau incrusté au-dessus de votre clavier Gboard"
+            title = "Studio Vocal & Clavier Gboard Intégré",
+            subtitle = "Clavier Gboard complet avec le bandeau WhisperOrb physiquement soudé au sommet"
         )
 
         // Scène 190dp de l'Orbe 3D 120 Hz (#0D0D11)
@@ -611,36 +640,212 @@ private fun Card1VoiceStudioSection(
             }
         }
 
-        // Switch 0 : Activer / Désactiver la barre au-dessus du Gboard
+        // Tableau de bord en direct : Badges de statut Clavier WhisperOrb Gboard & Bandeau Vocal Incrusté
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(InnerBoxColor)
+                .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Badge 1 : Clavier WhisperOrb Gboard
+            val keyboardBadgeText = when {
+                isKeyboardEnabled && isKeyboardSelected -> "Activé & Sélectionné ✓"
+                isKeyboardEnabled -> "Activé (non sélectionné)"
+                else -> "À activer"
+            }
+            val keyboardBadgeColor = when {
+                isKeyboardEnabled && isKeyboardSelected -> AppleGreen
+                isKeyboardEnabled -> AppleOrange
+                else -> AppleRed
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "⌨️ Clavier WhisperOrb Gboard",
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White.copy(alpha = 0.90f),
+                    modifier = Modifier.weight(1f)
+                )
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(keyboardBadgeColor.copy(alpha = 0.16f))
+                        .border(0.8.dp, keyboardBadgeColor.copy(alpha = 0.45f), CircleShape)
+                        .padding(horizontal = 9.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = keyboardBadgeText,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = keyboardBadgeColor
+                    )
+                }
+            }
+
+            // Badge 2 : Bandeau Vocal Incrusté
+            val barBadgeText = if (engine.isGboardBarEnabled) "ACTIF en haut du clavier" else "MASQUÉ"
+            val barBadgeColor = if (engine.isGboardBarEnabled) AppleGreen else Color.White.copy(alpha = 0.50f)
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "🎙️ Bandeau Vocal Incrusté",
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White.copy(alpha = 0.90f),
+                    modifier = Modifier.weight(1f)
+                )
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(
+                            if (engine.isGboardBarEnabled) AppleGreen.copy(alpha = 0.16f)
+                            else Color.White.copy(alpha = 0.08f)
+                        )
+                        .border(
+                            0.8.dp,
+                            if (engine.isGboardBarEnabled) AppleGreen.copy(alpha = 0.45f)
+                            else Color.White.copy(alpha = 0.18f),
+                            CircleShape
+                        )
+                        .padding(horizontal = 9.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = barBadgeText,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = barBadgeColor
+                    )
+                }
+            }
+
+            HorizontalDivider(color = Color.White.copy(alpha = 0.07f))
+
+            // Bouton 1 : 1. Activer le Clavier WhisperOrb Gboard
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(
+                        if (!isKeyboardEnabled) AppleBlue
+                        else Color.White.copy(alpha = 0.07f)
+                    )
+                    .border(
+                        width = 1.dp,
+                        color = if (isKeyboardEnabled) AppleGreen.copy(alpha = 0.45f) else Color.Transparent,
+                        shape = RoundedCornerShape(10.dp)
+                    )
+                    .clickable {
+                        triggerHaptic(context)
+                        try {
+                            context.startActivity(
+                                Intent(Settings.ACTION_INPUT_METHOD_SETTINGS).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                            )
+                        } catch (_: Exception) {
+                        }
+                        onForceRefresh()
+                    }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = if (isKeyboardEnabled) "✓" else "1",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isKeyboardEnabled) AppleGreen else Color.White
+                )
+                Text(
+                    text = "1. Activer le Clavier WhisperOrb Gboard",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = "↗",
+                    fontSize = 13.sp,
+                    color = Color.White.copy(alpha = 0.75f)
+                )
+            }
+
+            // Bouton 2 : 2. Choisir WhisperOrb Gboard comme clavier actif
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(
+                        if (isKeyboardEnabled && !isKeyboardSelected) AppleBlue
+                        else Color.White.copy(alpha = 0.07f)
+                    )
+                    .border(
+                        width = 1.dp,
+                        color = if (isKeyboardSelected) AppleGreen.copy(alpha = 0.45f) else Color.Transparent,
+                        shape = RoundedCornerShape(10.dp)
+                    )
+                    .clickable {
+                        triggerHaptic(context)
+                        try {
+                            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                            imm?.showInputMethodPicker()
+                        } catch (_: Exception) {
+                        }
+                        onForceRefresh()
+                    }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = if (isKeyboardSelected) "✓" else "2",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isKeyboardSelected) AppleGreen else Color.White
+                )
+                Text(
+                    text = "2. Choisir WhisperOrb Gboard comme clavier actif",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = "⌨️",
+                    fontSize = 13.sp
+                )
+            }
+        }
+
+        // Switch 0 : Bandeau WhisperOrb incrusté au-dessus du Gboard (sans redémarrer)
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Afficher la barre WhisperOrb au-dessus du Gboard",
+                text = "Bandeau WhisperOrb incrusté au-dessus du Gboard",
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Medium,
                 color = Color.White.copy(alpha = 0.92f),
                 modifier = Modifier.weight(1f)
             )
             Switch(
-                checked = engine.isGboardBarEnabled && isServiceActive,
+                checked = engine.isGboardBarEnabled,
                 onCheckedChange = { enabled ->
                     triggerHaptic(context)
-                    if (!isServiceActive) {
-                        engine.isGboardBarEnabled = true
-                        context.startActivity(
-                            Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                        )
-                    } else {
-                        engine.isGboardBarEnabled = enabled
-                        if (!enabled) {
-                            WhisperOrbAccessibilityService.forcePreviewOverlay = false
-                        }
-                        WhisperOrbAccessibilityService.requestRefresh()
-                    }
+                    engine.isGboardBarEnabled = enabled
                     onForceRefresh()
                 },
                 colors = SwitchDefaults.colors(
@@ -665,7 +870,6 @@ private fun Card1VoiceStudioSection(
                 checked = engine.isKeyboardCollapsed,
                 onCheckedChange = {
                     engine.isKeyboardCollapsed = it
-                    WhisperOrbAccessibilityService.requestRefresh()
                     onForceRefresh()
                 },
                 colors = SwitchDefaults.colors(
@@ -699,8 +903,8 @@ private fun Card1VoiceStudioSection(
             )
         }
 
-        // Bouton principal pour Activer / Désactiver la barre au-dessus du Gboard
-        val isBarCurrentlyActive = isServiceActive && engine.isGboardBarEnabled
+        // Bouton principal pour Afficher / Masquer immédiatement le Bandeau WhisperOrb incrusté au-dessus du Gboard
+        val isBarCurrentlyActive = engine.isGboardBarEnabled
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -713,20 +917,7 @@ private fun Card1VoiceStudioSection(
                 )
                 .clickable {
                     triggerHaptic(context)
-                    if (!isServiceActive) {
-                        engine.isGboardBarEnabled = true
-                        context.startActivity(
-                            Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                        )
-                    } else {
-                        engine.isGboardBarEnabled = !engine.isGboardBarEnabled
-                        if (!engine.isGboardBarEnabled) {
-                            WhisperOrbAccessibilityService.forcePreviewOverlay = false
-                        }
-                        WhisperOrbAccessibilityService.requestRefresh()
-                    }
+                    engine.isGboardBarEnabled = !engine.isGboardBarEnabled
                     onForceRefresh()
                 }
                 .padding(horizontal = 14.dp, vertical = 12.dp),
@@ -742,24 +933,171 @@ private fun Card1VoiceStudioSection(
                 verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 Text(
-                    text = when {
-                        !isServiceActive -> "Autoriser la barre WhisperOrb sur Gboard"
-                        engine.isGboardBarEnabled -> "Barre au-dessus du Gboard : ACTIVÉE (Désactiver)"
-                        else -> "Barre au-dessus du Gboard : DÉSACTIVÉE (Activer)"
+                    text = if (isBarCurrentlyActive) {
+                        "Bandeau WhisperOrb incrusté : ACTIF (Masquer)"
+                    } else {
+                        "Bandeau WhisperOrb incrusté : MASQUÉ (Afficher)"
                     },
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = Color.White
                 )
                 Text(
-                    text = when {
-                        !isServiceActive -> "Touchez ici pour autoriser WhisperOrb dans Accessibilité"
-                        engine.isGboardBarEnabled -> engine.statusBannerMessage
-                        else -> "Touchez pour réactiver le bandeau vocal au-dessus de votre Gboard"
+                    text = if (isBarCurrentlyActive) {
+                        engine.statusBannerMessage
+                    } else {
+                        "Touchez pour réafficher immédiatement le bandeau en haut du clavier Gboard"
                     },
                     fontSize = 11.sp,
                     color = Color.White.copy(alpha = 0.80f)
                 )
+            }
+        }
+
+        // Bouton de personnalisation complète du clavier Gboard / HeliBoard intégré
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(InnerBoxColor)
+                .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
+                .clickable {
+                    triggerHaptic(context)
+                    try {
+                        context.startActivity(
+                            Intent().setClassName(
+                                context.packageName,
+                                "helium314.keyboard.settings.SettingsActivity"
+                            ).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                        )
+                    } catch (_: Exception) {
+                    }
+                }
+                .padding(horizontal = 14.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "⚙ Personnaliser le clavier Gboard (Swipe, Toucher, Disposition)",
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                text = "›",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = AppleBlue
+            )
+        }
+
+        // Section secondaire repliable : 🫧 Bulle Flottante Universelle (Optionnel)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(InnerBoxColor)
+                .border(1.dp, Color.White.copy(alpha = 0.07f), RoundedCornerShape(12.dp))
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { floatingBubbleSectionExpanded = !floatingBubbleSectionExpanded },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = "🫧 Bulle Flottante Universelle (Optionnel)",
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White.copy(alpha = 0.90f)
+                    )
+                    Text(
+                        text = "Orbe flottant 56dp aimanté aux bords de l'écran en plus du clavier",
+                        fontSize = 11.sp,
+                        color = Color.White.copy(alpha = 0.55f)
+                    )
+                }
+
+                Switch(
+                    checked = engine.isFloatingBubbleEnabled && isAccessibilityServiceActive,
+                    onCheckedChange = { enabled ->
+                        triggerHaptic(context)
+                        engine.isFloatingBubbleEnabled = enabled
+                        if (enabled) {
+                            floatingBubbleSectionExpanded = true
+                            if (!isAccessibilityServiceActive) {
+                                try {
+                                    context.startActivity(
+                                        Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
+                                    )
+                                } catch (_: Exception) {
+                                }
+                            }
+                        }
+                        WhisperOrbAccessibilityService.requestRefresh()
+                        onForceRefresh()
+                    },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = AppleBlue
+                    )
+                )
+            }
+
+            AnimatedVisibility(visible = floatingBubbleSectionExpanded || engine.isFloatingBubbleEnabled) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(
+                            if (isAccessibilityServiceActive) Color.White.copy(alpha = 0.05f)
+                            else AppleBlue.copy(alpha = 0.20f)
+                        )
+                        .clickable {
+                            triggerHaptic(context)
+                            try {
+                                context.startActivity(
+                                    Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                )
+                            } catch (_: Exception) {
+                            }
+                        }
+                        .padding(horizontal = 11.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = if (isAccessibilityServiceActive) "✓" else "⚙️",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isAccessibilityServiceActive) AppleGreen else AppleBlue
+                    )
+                    Text(
+                        text = if (isAccessibilityServiceActive) {
+                            "Service d'Accessibilité actif • La bulle flottante est prête"
+                        } else {
+                            "Autoriser le Service d'Accessibilité pour afficher la bulle flottante"
+                        },
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White.copy(alpha = 0.88f),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
         }
 
@@ -815,7 +1153,7 @@ private fun Card1VoiceStudioSection(
                 },
                 placeholder = {
                     Text(
-                        text = "Touchez ici pour afficher votre vrai clavier Gboard avec la barre WhisperOrb incrustée juste au-dessus...",
+                        text = "Touchez ici pour afficher votre clavier WhisperOrb Gboard avec le bandeau vocal incrusté au sommet...",
                         fontSize = 13.sp,
                         color = Color.White.copy(alpha = 0.38f)
                     )
@@ -2155,33 +2493,33 @@ private fun Card5GitHubAndSetupSection(
 
         HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
 
-        // Guide 1-2-3-4 d'incrustation sur le vrai Gboard
+        // Guide 1-2-3-4 du Clavier Gboard intégré & Bandeau Vocal
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
-                text = "Guide d'incrustation Gboard en 4 étapes",
+                text = "Guide d'activation du Clavier Gboard Intégré en 4 étapes",
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = Color.White.copy(alpha = 0.80f)
             )
             SetupStepItem(
                 num = "1",
-                text = "Gardez votre vrai clavier Gboard actif par défaut sur Android."
+                text = "Touchez « 1. Activer le Clavier WhisperOrb Gboard » dans la Carte 1 ci-dessus."
             )
             SetupStepItem(
                 num = "2",
                 text = if (isServiceActive) {
-                    "✓ Service WhisperOrb Gboard actif ! Le bandeau s'affiche automatiquement au-dessus de Gboard."
+                    "✓ Clavier WhisperOrb Gboard sélectionné ! Le bandeau vocal est soudé au sommet du clavier."
                 } else {
-                    "Activez « WhisperOrb — Orbe IA Incrusté Gboard » dans Paramètres → Accessibilité."
+                    "Touchez « 2. Choisir WhisperOrb Gboard comme clavier actif » pour l'utiliser partout."
                 }
             )
             SetupStepItem(
                 num = "3",
-                text = "Touchez « ⚙ » sur la barre pour remplacer les touches Gboard par le panneau WhisperOrb."
+                text = "Touchez « ⚙ » sur le bandeau pour ouvrir les réglages rapides WhisperOrb ou personnalisez Gboard."
             )
             SetupStepItem(
                 num = "4",
-                text = "Touchez « ▾ Réduire » pour rétracter Gboard et ne garder que la barre vocale en bas !"
+                text = "Touchez « ▾ Réduire » pour replier les touches et dicter avec le bandeau vocal seul !"
             )
         }
     }

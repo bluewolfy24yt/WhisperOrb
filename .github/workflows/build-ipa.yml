@@ -1,4 +1,4 @@
-name: Build & Release WhisperOrb v2.1.0 (.ipa & .apk)
+name: Build & Release WhisperOrb v2.2.0 (.ipa & .apk)
 
 on:
   push:
@@ -22,10 +22,10 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: 3. Set up Gradle 8.9
+      - name: 3. Set up Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
+          gradle-version: '8.11.1'
 
       - name: 4. Clone Official whisper.cpp (b5454) for Android NDK
         run: |
@@ -51,25 +51,24 @@ jobs:
           path: WhisperOrb-Android.apk
           if-no-files-found: error
 
-      - name: 7. Publish Android APK to GitHub Release v2.1.1
+      - name: 7. Publish Android APK to GitHub Release v2.2.0
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.1.1
-          name: "WhisperOrb v2.1.1 — Parité 1:1 Apple (.ipa) & Android Gboard (.apk)"
+          tag_name: v2.2.0
+          name: "WhisperOrb v2.2.0 — Clavier Gboard/HeliBoard Natif avec Bandeau Incrusté (.apk & .ipa)"
           body: |
-            ## 🫧 WhisperOrb `v2.1.0` — Parité 1:1 Apple & Android + Incrustation Gboard 3-États + Easter Egg 7 Niveaux
+            ## 🫧 WhisperOrb `v2.2.0` — Clavier Gboard/HeliBoard Complet Intégré + Bandeau Incrusté dans le Code Source du Clavier
 
-            ### 🇫🇷 Nouveautés Majeures (`v2.1.0`)
-            - 🤖 **Android (`WhisperOrb-Android.apk` — Jetpack Compose + Material 3)** :
-              1. **Clone visuel et fonctionnel 1:1 de l'application Apple (`ContentView.swift`)** : les 6 cartes complètes, mode 2 colonnes automatique sur Tablettes & Googlebook 14, sélecteur de 32 couleurs + recherche de 140+ teintes FR/EN, ColorPickers RGB/Hex, curseur de silence VAD, mémoire `user_style_memory.json` et vrai QR Code.
-              2. **Vrai Clavier Gboard conservé + Incrustation 3-États (`WhisperOrbAccessibilityService`)** :
-                 - **État 1 (Gboard ouvert)** : bandeau vocal sombre style Apple verrouillé au pixel près juste au-dessus du sommet de Gboard (`imeRect.top - barHeight`), avec masquage automatique sur les claviers de chiffres/téléphone.
-                 - **État 2 (Panneau `⚙` DANS la zone de Gboard)** : toucher `⚙` (ou maintenir l'Orbe) remplace les touches de Gboard par le panneau de réglages rapides WhisperOrb (Langues, 7 Modèles IA, 32 Couleurs d'Orbe).
-                 - **État 3 (Rétractation physique `▾ Réduire`)** : toucher `▾ Réduire` rétracte physiquement Gboard et laisse uniquement la barre vocale compacte en bas de l'écran (avec `▴ Clavier` pour ré-ouvrir Gboard).
-              3. **Conservation garantie des modèles téléchargés** : signature cryptographique permanente (`whisperorb-release.p12`) + stockage persistant dans `/sdcard/Android/media/com.whisperorb.app/Models/`.
-            - 🔓 **Déblocage jusqu'à `Whisper Expert (v3 Turbo)` dès 4 Go RAM + Easter Egg des 7 Messages (Apple & Android, FR/EN)** :
-              - Les appareils 4 Go RAM débloquent désormais les 5 premiers modèles jusqu'à **🚀 Whisper Expert (v3 Turbo)**.
-              - Cliquer sur **« Débloquer »** lance l'Easter Egg progressif des **7 avertissements FR/EN** pour débloquer de force `Expert+ Q8` et `TITAN (1,08 Go)`.
+            ### 🇫🇷 Nouveautés Majeures (`v2.2.0`)
+            - ⌨️ **Moteur Clavier Gboard / HeliBoard v3.2 Complet Intégré dans `WhisperOrb-Android.apk`** :
+              1. **Bandeau WhisperOrb physiquement soudé DANS le code source du clavier (`main_keyboard_frame.xml` / `LatinIME`)** : zéro fenêtre flottante, zéro calcul de coordonnées écran, alignement parfait au pixel près au sommet du clavier.
+              2. **Écriture Glissée (Swipe / Glide Typing) native pré-intégrée** (`libjni_latinimegoogle.so` arm64-v8a embarquée d'office).
+              3. **Détection automatique de la langue système dès la 1ère seconde** : **AZERTY (Français)** + dictionnaire hors-ligne FR si le téléphone est en français, **QWERTY (English)** + dictionnaire hors-ligne EN si en anglais, avec support bilingue FR/EN, barre de suggestions/autocorrect, sélecteur d'Emojis et Presse-papiers.
+              4. **3 États natifs dans le clavier** :
+                 - **Normal** : Bandeau WhisperOrb en haut + Barre de suggestions Gboard + Touches AZERTY/QWERTY.
+                 - **Réduit (`▾ Réduire`)** : replie les touches en interne (`View.GONE`) et redimensionne nativement la fenêtre du clavier Android (`onComputeInsets`) à `58dp` en bas de l'écran.
+                 - **Réglages (`⚙`)** : ouvre le panneau de réglages rapides WhisperOrb (Langues, 7 Modèles IA, Envoi auto, 32 Couleurs d'Orbe) directement à la place des touches.
+              5. **Bouton ON/OFF en temps réel (Carte 1)** : affiche ou masque instantanément le bandeau en haut du clavier intégré, plus option **Bulle Flottante Universelle** indépendante.
           files: WhisperOrb-Android.apk
           draft: false
           prerelease: false
@@ -133,11 +132,11 @@ jobs:
           path: WhisperOrb-iPad.ipa
           if-no-files-found: error
 
-      - name: 8. Publish Apple IPA to GitHub Release v2.1.1
+      - name: 8. Publish Apple IPA to GitHub Release v2.2.0
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.1.1
-          name: "WhisperOrb v2.1.1 — Parité 1:1 Apple (.ipa) & Android Gboard (.apk)"
+          tag_name: v2.2.0
+          name: "WhisperOrb v2.2.0 — Clavier Gboard/HeliBoard Natif avec Bandeau Incrusté (.apk & .ipa)"
           files: WhisperOrb-iPad.ipa
           draft: false
           prerelease: false

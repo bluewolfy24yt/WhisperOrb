@@ -7,6 +7,8 @@ import android.content.Context
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.provider.Settings
+import android.view.inputmethod.InputMethodManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -27,6 +29,41 @@ class WhisperAndroidEngine private constructor(private val context: Context) {
         fun getInstance(context: Context): WhisperAndroidEngine {
             return instance ?: synchronized(this) {
                 instance ?: WhisperAndroidEngine(context.applicationContext).also { instance = it }
+            }
+        }
+
+        fun isWhisperOrbKeyboardEnabled(context: Context): Boolean {
+            return try {
+                val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                if (imm?.enabledInputMethodList?.any { it.packageName == context.packageName } == true) {
+                    return true
+                }
+                val enabledServices = Settings.Secure.getString(
+                    context.contentResolver,
+                    Settings.Secure.ENABLED_INPUT_METHODS
+                ) ?: return false
+                enabledServices.split(':').any {
+                    it.startsWith("${context.packageName}/") || it.equals(context.packageName, ignoreCase = true)
+                }
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+        fun isWhisperOrbKeyboardSelected(context: Context): Boolean {
+            return try {
+                val defaultIme = Settings.Secure.getString(
+                    context.contentResolver,
+                    Settings.Secure.DEFAULT_INPUT_METHOD
+                )
+                if (defaultIme?.startsWith("${context.packageName}/") == true ||
+                    defaultIme?.equals(context.packageName, ignoreCase = true) == true
+                ) {
+                    return true
+                }
+                false
+            } catch (_: Exception) {
+                false
             }
         }
     }
@@ -107,10 +144,27 @@ class WhisperAndroidEngine private constructor(private val context: Context) {
         }
 
     var isGboardBarEnabled: Boolean
-        get() = prefs.getBoolean("isGboardBarEnabled", true)
+        get() = prefs.getBoolean(
+            "is_gboard_bar_enabled",
+            prefs.getBoolean("isGboardBarEnabled", true)
+        )
         set(value) {
-            prefs.edit().putBoolean("isGboardBarEnabled", value).apply()
+            prefs.edit()
+                .putBoolean("is_gboard_bar_enabled", value)
+                .putBoolean("isGboardBarEnabled", value)
+                .apply()
             notifyListeners()
+            WhisperOrbAccessibilityService.requestRefresh()
+        }
+
+    var isFloatingBubbleEnabled: Boolean
+        get() = prefs.getBoolean("is_floating_bubble_enabled", false)
+        set(value) {
+            prefs.edit()
+                .putBoolean("is_floating_bubble_enabled", value)
+                .apply()
+            notifyListeners()
+            WhisperOrbAccessibilityService.requestRefresh()
         }
 
     var isSmartAutocorrectEnabled: Boolean
@@ -498,7 +552,12 @@ class WhisperAndroidEngine private constructor(private val context: Context) {
 
         if (processed == "__COMMAND_DELETE_LAST_SENTENCE__") {
             if (lastInsertedSentenceLength > 0) {
-                onDeleteLastSentenceRequested?.invoke(lastInsertedSentenceLength)
+                val deleteHandler = onDeleteLastSentenceRequested
+                if (deleteHandler != null) {
+                    deleteHandler.invoke(lastInsertedSentenceLength)
+                } else {
+                    WhisperOrbAccessibilityService.activeInstance?.deleteLastCharactersFromActiveField(lastInsertedSentenceLength)
+                }
                 if (liveTestTranscript.length >= lastInsertedSentenceLength) {
                     liveTestTranscript = liveTestTranscript.dropLast(lastInsertedSentenceLength)
                 }
@@ -519,7 +578,12 @@ class WhisperAndroidEngine private constructor(private val context: Context) {
             cm?.setPrimaryClip(ClipData.newPlainText("WhisperOrb", withSpace))
         }
 
-        onTranscribedTextForKeyboard?.invoke(withSpace)
+        val textHandler = onTranscribedTextForKeyboard
+        if (textHandler != null) {
+            textHandler.invoke(withSpace)
+        } else {
+            WhisperOrbAccessibilityService.activeInstance?.insertTranscribedTextIntoActiveField(withSpace)
+        }
         statusBannerMessage = "Transcrit en $latencyMs ms • Inséré au clavier"
         notifyListeners()
     }
