@@ -12,9 +12,9 @@ android {
     defaultConfig {
         applicationId = "com.whisperorb.app"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 220
-        versionName = "2.2.0"
+        targetSdk = 34
+        versionCode = 221
+        versionName = "2.2.1"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")

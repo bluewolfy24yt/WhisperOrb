@@ -1299,9 +1299,11 @@ public class LatinIME extends InputMethodService implements
             mInsetsUpdater.setInsets(outInsets);
             return;
         }
+        final View mainFrame = mInputView.findViewById(R.id.main_keyboard_frame);
+        final int bottomFramePadding = (mainFrame != null) ? mainFrame.getPaddingBottom() : 0;
         final int stripHeight = (mKeyboardSwitcher.isShowingStripContainer() && mKeyboardSwitcher.getStripContainer() != null && mKeyboardSwitcher.getStripContainer().isShown()) ? mKeyboardSwitcher.getStripContainer().getHeight() : 0;
         final int kbHeight = visibleKeyboardView.isShown() ? visibleKeyboardView.getHeight() : 0;
-        final int visibleTopY = Math.max(0, inputHeight - kbHeight - stripHeight - whisperHeaderHeight - whisperPanelHeight);
+        final int visibleTopY = Math.max(0, inputHeight - kbHeight - stripHeight - whisperHeaderHeight - whisperPanelHeight - bottomFramePadding);
 
         if (hasSuggestionStripView()) {
             mSuggestionStripView.setMoreSuggestionsHeight(visibleTopY);

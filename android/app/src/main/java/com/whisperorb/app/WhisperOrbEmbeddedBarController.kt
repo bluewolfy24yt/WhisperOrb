@@ -193,7 +193,7 @@ class WhisperOrbEmbeddedBarController private constructor(
                 maskedClass == InputType.TYPE_CLASS_DATETIME
             )
 
-        if (isNumericFieldFocused) {
+        if (!restarting || isNumericFieldFocused) {
             isQuickSelectorOpen = false
             isCollapsedMode = false
             engine.isKeyboardCollapsed = false
@@ -204,9 +204,9 @@ class WhisperOrbEmbeddedBarController private constructor(
     }
 
     override fun onFinishInputView(ime: InputMethodService, finishingInput: Boolean) {
-        if (isQuickSelectorOpen) {
-            isQuickSelectorOpen = false
-        }
+        isQuickSelectorOpen = false
+        isCollapsedMode = false
+        engine.isKeyboardCollapsed = false
         applyBarAndKeyboardLayoutState()
         refreshBarAndPanelContent()
     }
@@ -463,7 +463,7 @@ class WhisperOrbEmbeddedBarController private constructor(
 
         val content = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(ctx, 14), dp(ctx, 10), dp(ctx, 14), dp(ctx, 14))
+            setPadding(dp(ctx, 14), dp(ctx, 10), dp(ctx, 14), dp(ctx, 56))
         }
 
         // 1. Header row avec titre + "⌨ Clavier Gboard" + "🔧 Options Gboard"
@@ -687,8 +687,10 @@ class WhisperOrbEmbeddedBarController private constructor(
         val panelSlot = panelSlotRef ?: return
         val stripContainer = stripContainerRef ?: return
         val keyboardWrapper = keyboardWrapperRef ?: return
+        val mainFrame = headerSlot.parent as? View
 
         if (!engine.isGboardBarEnabled) {
+            mainFrame?.setPadding(0, 0, 0, 0)
             headerSlot.visibility = View.GONE
             panelSlot.visibility = View.GONE
             stripContainer.visibility = View.VISIBLE
@@ -698,6 +700,7 @@ class WhisperOrbEmbeddedBarController private constructor(
         }
 
         if (isNumericFieldFocused) {
+            mainFrame?.setPadding(0, 0, 0, 0)
             headerSlot.visibility = View.VISIBLE
             panelSlot.visibility = View.GONE
             stripContainer.visibility = View.VISIBLE
@@ -710,25 +713,28 @@ class WhisperOrbEmbeddedBarController private constructor(
 
         when {
             isQuickSelectorOpen -> {
-                // État 3 : Panneau de réglages intégré dans panelSlot (280dp)
+                // État 3 : Panneau de réglages intégré dans panelSlot (300dp)
+                mainFrame?.setPadding(0, 0, 0, 0)
                 stripContainer.visibility = View.GONE
                 keyboardWrapper.visibility = View.GONE
                 panelSlot.visibility = View.VISIBLE
                 val lp = panelSlot.layoutParams
-                val targetH = dp(panelSlot.context, 280)
+                val targetH = dp(panelSlot.context, 300)
                 if (lp != null && lp.height != targetH) {
                     lp.height = targetH
                     panelSlot.layoutParams = lp
                 }
             }
             isCollapsedMode -> {
-                // État 2 : Mode Réduit (uniquement headerSlot visible à 58dp en bas de l'écran)
+                // État 2 : Mode Réduit (headerSlot visible à 58dp + 48dp de marge au-dessus de la barre nav ⌄ / 🌐)
+                mainFrame?.setPadding(0, 0, 0, dp(headerSlot.context, 48))
                 stripContainer.visibility = View.GONE
                 keyboardWrapper.visibility = View.GONE
                 panelSlot.visibility = View.GONE
             }
             else -> {
                 // État 1 : Clavier Gboard complet sous le Bandeau WhisperOrb
+                mainFrame?.setPadding(0, 0, 0, 0)
                 stripContainer.visibility = View.VISIBLE
                 keyboardWrapper.visibility = View.VISIBLE
                 panelSlot.visibility = View.GONE
