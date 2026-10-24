@@ -119,12 +119,16 @@ public final class UserStyleMemoryManager: ObservableObject {
         let fileURL = AppGroupManager.shared.sharedContainerURL.appendingPathComponent(Self.fileName, isDirectory: false)
         if let data = try? Data(contentsOf: fileURL),
            var decoded = try? JSONDecoder().decode(UserStyleMemoryPayload.self, from: data) {
+            var needsMigrationSave = false
             if decoded.version < 3 {
                 decoded.version = 3
                 decoded.stripTrailingPeriodOnShortMessages = false
-                savePayloadToDisk(decoded, url: fileURL)
+                needsMigrationSave = true
             }
             self.memory = decoded
+            if needsMigrationSave {
+                savePayloadToDisk(decoded, url: fileURL)
+            }
         } else {
             let initial = UserStyleMemoryPayload()
             self.memory = initial
