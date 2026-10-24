@@ -186,8 +186,15 @@ public final class ModelDownloader: NSObject, ObservableObject, URLSessionDownlo
                 self.downloadTasks.removeValue(forKey: tier)
                 self.taskToTierMap.removeValue(forKey: downloadTask.taskIdentifier)
                 self.refreshDownloadedModels()
-                // Sélectionne automatiquement le modèle qui vient d'être téléchargé
-                AppGroupManager.shared.selectedModel = tier
+                // Sélectionne et charge automatiquement le modèle qui vient d'être téléchargé
+                if AppGroupManager.shared.selectedModel != tier {
+                    AppGroupManager.shared.selectedModel = tier
+                } else {
+                    WhisperEngine.shared.loadModel(tier)
+                }
+                if !WhisperEngine.shared.isBackgroundEngineRunning {
+                    WhisperEngine.shared.startBackgroundAudioEngine()
+                }
             }
         } catch {
             DispatchQueue.main.async {

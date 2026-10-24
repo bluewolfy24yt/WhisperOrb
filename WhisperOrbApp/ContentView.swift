@@ -420,9 +420,9 @@ public struct ContentView: View {
                     .buttonStyle(.plain)
 
                     Button(action: {
-                        appGroup.triggerDeleteLastSentence()
                         if whisperEngine.liveTestTranscript.count >= appGroup.lastInsertedSentenceLength && appGroup.lastInsertedSentenceLength > 0 {
                             whisperEngine.liveTestTranscript.removeLast(appGroup.lastInsertedSentenceLength)
+                            appGroup.clearLastInsertedSentenceLength()
                         } else {
                             whisperEngine.liveTestTranscript = ""
                         }
@@ -636,8 +636,14 @@ public struct ContentView: View {
                     .buttonStyle(.plain)
                 } else if isDownloaded {
                     Button(action: {
-                        appGroup.selectedModel = tier
-                        whisperEngine.loadModel(tier)
+                        if appGroup.selectedModel != tier {
+                            appGroup.selectedModel = tier
+                        } else {
+                            whisperEngine.loadModel(tier)
+                        }
+                        if !whisperEngine.isBackgroundEngineRunning {
+                            whisperEngine.startBackgroundAudioEngine()
+                        }
                     }) {
                         HStack(spacing: 6) {
                             Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")

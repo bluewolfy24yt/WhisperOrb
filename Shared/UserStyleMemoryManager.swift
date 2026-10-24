@@ -13,9 +13,9 @@ public struct UserStyleMemoryPayload: Codable, Equatable {
     public var updatedAt: TimeInterval
 
     public init(
-        version: Int = 2,
+        version: Int = 3,
         autoCapitalizeStart: Bool = true,
-        stripTrailingPeriodOnShortMessages: Bool = true,
+        stripTrailingPeriodOnShortMessages: Bool = false,
         shortMessageMaxWords: Int = 12,
         replacementsByLanguage: [String: [String: String]] = Self.defaultReplacementsByLanguage(),
         learnedCorrections: [String: String] = [:],
@@ -118,7 +118,12 @@ public final class UserStyleMemoryManager: ObservableObject {
 
         let fileURL = AppGroupManager.shared.sharedContainerURL.appendingPathComponent(Self.fileName, isDirectory: false)
         if let data = try? Data(contentsOf: fileURL),
-           let decoded = try? JSONDecoder().decode(UserStyleMemoryPayload.self, from: data) {
+           var decoded = try? JSONDecoder().decode(UserStyleMemoryPayload.self, from: data) {
+            if decoded.version < 3 {
+                decoded.version = 3
+                decoded.stripTrailingPeriodOnShortMessages = false
+                savePayloadToDisk(decoded, url: fileURL)
+            }
             self.memory = decoded
         } else {
             let initial = UserStyleMemoryPayload()

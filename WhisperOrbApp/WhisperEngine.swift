@@ -20,6 +20,7 @@ public final class WhisperEngine: ObservableObject {
     // MARK: - Gestion Stricte de la RAM & Accélération GPU Metal + FlashAttention (whisper.xcframework)
 
     private var whisperContext: OpaquePointer? = nil
+    private var loadingTier: WhisperModelTier? = nil
     private let inferenceQueue = DispatchQueue(label: "com.bluewolfy24yt.whisperorb.metal.inference", qos: .userInteractive)
     public let optimalThreadCount: Int = HardwareDetector.optimalThreadCount
     private var activeLangCString: UnsafeMutablePointer<CChar>? = nil
@@ -74,11 +75,12 @@ public final class WhisperEngine: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] newTier in
                 guard let self = self else { return }
-                if self.loadedTier != nil && self.loadedTier != newTier {
-                    self.unloadCurrentModel()
-                    if ModelDownloader.shared.isModelDownloaded(newTier) {
+                if ModelDownloader.shared.isModelDownloaded(newTier) {
+                    if self.loadedTier != newTier && self.loadingTier != newTier {
                         self.loadModel(newTier)
                     }
+                } else if self.loadedTier != nil && self.loadedTier != newTier {
+                    self.unloadCurrentModel()
                 }
             }
             .store(in: &cancellables)
@@ -127,6 +129,12 @@ public final class WhisperEngine: ObservableObject {
             name: AVAudioSession.interruptionNotification,
             object: AVAudioSession.sharedInstance()
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAudioEngineConfigurationChange(_:)),
+            name: .AVAudioEngineConfigurationChange,
+            object: audioEngine
+        )
     }
 
     @objc private func handleAudioSessionInterruption(_ notification: Notification) {
@@ -136,12 +144,24 @@ public final class WhisperEngine: ObservableObject {
             return
         }
 
-        if type == .ended {
-            if isBackgroundEngineRunning {
-                try? configureAndActivateAudioSession()
-                if !audioEngine.isRunning {
-                    try? audioEngine.start()
-                }
+        if type == .began {
+            if AppGroupManager.shared.orbState == .listening {
+                AppGroupManager.shared.orbState = .idle
+                AppGroupManager.shared.updateLiveAudioLevel(0.0)
+            }
+        } else if type == .ended {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                guard let self = self, self.isBackgroundEngineRunning else { return }
+                self.startEngineInternal()
+            }
+        }
+    }
+
+    @objc private func handleAudioEngineConfigurationChange(_ notification: Notification) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self = self, self.isBackgroundEngineRunning else { return }
+            if !self.audioEngine.isRunning {
+                self.startEngineInternal()
             }
         }
     }
@@ -149,17 +169,26 @@ public final class WhisperEngine: ObservableObject {
     // MARK: - 1. Gestion Stricte de la RAM & Initialisation GPU Metal + FlashAttention
 
     public func unloadCurrentModel() {
-        inferenceQueue.sync {
-            if let ctx = whisperContext {
-                whisper_free(ctx)
-                whisperContext = nil
+        loadedTier = nil
+        loadingTier = nil
+        inferenceQueue.async { [weak self] in
+            guard let self = self else { return }
+            autoreleasepool {
+                if let ctx = self.whisperContext {
+                    whisper_free(ctx)
+                    self.whisperContext = nil
+                }
             }
         }
-        loadedTier = nil
     }
 
     public func loadModel(_ tier: WhisperModelTier) {
-        guard HardwareDetector.isTierUnlocked(tier, simulate4GB: AppGroupManager.shared.simulateModest4GBDevice) else {
+        let appGroup = AppGroupManager.shared
+        guard HardwareDetector.isTierUnlocked(
+            tier,
+            simulate4GB: appGroup.simulateModest4GBDevice,
+            forceUnlock: appGroup.forceUnlockAllModels
+        ) else {
             lastErrorMessage = "Le modèle \(tier.displayName) nécessite \(tier.requiredRAMBadgeText) sur cet appareil."
             return
         }
@@ -171,78 +200,97 @@ public final class WhisperEngine: ObservableObject {
             return
         }
 
-        if loadedTier == tier, whisperContext != nil {
+        if (loadedTier == tier && whisperContext != nil && !isLoadingModel) || (loadingTier == tier && isLoadingModel) {
             return
         }
 
         isLoadingModel = true
+        loadingTier = tier
         lastErrorMessage = nil
         statusBannerMessage = "Chargement GPU Metal de \(tier.displayName) (\(tier.ramUsageMB) Mo)..."
 
-        unloadCurrentModel()
-
         let modelPath = modelURL.path
-        let currentLangSelection = AppGroupManager.shared.selectedLanguage
+        let currentLangSelection = appGroup.selectedLanguage
         let resolvedLang = currentLangSelection.resolvedWhisperCode
         let promptSeed = currentLangSelection.initialPunctuationPrompt
+        let isConstrainedRAM = HardwareDetector.physicalMemoryGB < 5.5 || appGroup.simulateModest4GBDevice
 
         inferenceQueue.async { [weak self] in
             guard let self = self else { return }
 
-            if let old = self.activeLangCString {
-                free(old)
-            }
-            self.activeLangCString = strdup(resolvedLang)
+            autoreleasepool {
+                if let existingCtx = self.whisperContext {
+                    whisper_free(existingCtx)
+                    self.whisperContext = nil
+                }
 
-            var cparams = whisper_context_default_params()
-            cparams.use_gpu = true
-            cparams.flash_attn = true
+                if let old = self.activeLangCString {
+                    free(old)
+                }
+                self.activeLangCString = strdup(resolvedLang)
 
-            var ctx = whisper_init_from_file_with_params(modelPath, cparams)
-            var metalActive = true
+                var cparams = whisper_context_default_params()
+                cparams.use_gpu = true
+                // Sur iPhone 4 Go (ou modèles >= 500 Mo sur appareils < 5.5 Go), désactiver flash_attn
+                // évite un pic d'allocation des buffers KV Metal qui provoque un Jetsam kill iOS.
+                cparams.flash_attn = !(isConstrainedRAM && tier.sizeMB >= 500)
 
-            if ctx == nil {
-                cparams.flash_attn = false
-                ctx = whisper_init_from_file_with_params(modelPath, cparams)
-            }
-            if ctx == nil {
-                cparams.use_gpu = false
-                metalActive = false
-                ctx = whisper_init_from_file_with_params(modelPath, cparams)
-            }
+                var ctx = whisper_init_from_file_with_params(modelPath, cparams)
+                var metalActive = true
 
-            var extractedTokens: [whisper_token] = []
-            if let validCtx = ctx {
-                var tempTokens = [whisper_token](repeating: 0, count: 16)
-                let count = promptSeed.withCString { cStr in
-                    tempTokens.withUnsafeMutableBufferPointer { buf in
-                        whisper_tokenize(validCtx, cStr, buf.baseAddress, Int32(buf.count))
+                if ctx == nil && cparams.flash_attn {
+                    cparams.flash_attn = false
+                    ctx = whisper_init_from_file_with_params(modelPath, cparams)
+                }
+                if ctx == nil {
+                    cparams.use_gpu = false
+                    metalActive = false
+                    ctx = whisper_init_from_file_with_params(modelPath, cparams)
+                }
+
+                var extractedTokens: [whisper_token] = []
+                if let validCtx = ctx {
+                    var tempTokens = [whisper_token](repeating: 0, count: 16)
+                    let count = promptSeed.withCString { cStr in
+                        tempTokens.withUnsafeMutableBufferPointer { buf in
+                            whisper_tokenize(validCtx, cStr, buf.baseAddress, Int32(buf.count))
+                        }
+                    }
+                    if count > 0 {
+                        extractedTokens = Array(tempTokens.prefix(Int(count)))
+                    }
+
+                    // Éviter le passe de warmup sur les modèles lourds (>= 500 Mo) sur appareils <= 4 Go
+                    // pour ne pas doubler le pic mémoire immédiatement après l'initialisation.
+                    if !(isConstrainedRAM && tier.sizeMB >= 500) {
+                        var warmupParams = self.makeWhisperFullParams(audioDurationSeconds: 0.5, isAutoDetect: resolvedLang == "auto")
+                        warmupParams.initial_prompt = nil
+                        warmupParams.max_tokens = 1
+                        let warmupSilence = [Float](repeating: 0.0, count: 8000)
+                        _ = warmupSilence.withUnsafeBufferPointer { ptr in
+                            whisper_full(validCtx, warmupParams, ptr.baseAddress, Int32(warmupSilence.count))
+                        }
                     }
                 }
-                if count > 0 {
-                    extractedTokens = Array(tempTokens.prefix(Int(count)))
-                }
 
-                var warmupParams = self.makeWhisperFullParams(audioDurationSeconds: 0.5, isAutoDetect: resolvedLang == "auto")
-                warmupParams.initial_prompt = nil
-                warmupParams.max_tokens = 1
-                let warmupSilence = [Float](repeating: 0.0, count: 8000)
-                _ = warmupSilence.withUnsafeBufferPointer { ptr in
-                    whisper_full(validCtx, warmupParams, ptr.baseAddress, Int32(warmupSilence.count))
-                }
-            }
-
-            DispatchQueue.main.async {
-                self.cachedPromptTokens = extractedTokens
                 self.whisperContext = ctx
-                self.loadedTier = ctx != nil ? tier : nil
-                self.isLoadingModel = false
-                if ctx != nil {
-                    let accelLabel = metalActive ? "GPU Metal + FlashAttention" : "\(self.optimalThreadCount) cœurs Performance"
-                    self.statusBannerMessage = "\(tier.shortBadgeName) actif • \(accelLabel)"
-                } else {
-                    self.lastErrorMessage = "Échec de l'initialisation du modèle \(tier.displayName)."
-                    self.statusBannerMessage = "Erreur de chargement du modèle"
+                self.cachedPromptTokens = extractedTokens
+
+                let loadedSuccessfully = (ctx != nil)
+                let flashEnabled = cparams.flash_attn
+                DispatchQueue.main.async {
+                    self.loadedTier = loadedSuccessfully ? tier : nil
+                    self.loadingTier = nil
+                    self.isLoadingModel = false
+                    if loadedSuccessfully {
+                        let accelLabel = metalActive
+                            ? (flashEnabled ? "GPU Metal + FlashAttention" : "GPU Metal (Mémoire Optimisée)")
+                            : "\(self.optimalThreadCount) cœurs Performance"
+                        self.statusBannerMessage = "\(tier.shortBadgeName) actif • \(accelLabel)"
+                    } else {
+                        self.lastErrorMessage = "Échec de l'initialisation du modèle \(tier.displayName) (mémoire insuffisante)."
+                        self.statusBannerMessage = "Erreur de chargement du modèle"
+                    }
                 }
             }
         }
@@ -311,19 +359,29 @@ public final class WhisperEngine: ObservableObject {
         do {
             try configureAndActivateAudioSession()
 
-            let selectedTier = AppGroupManager.shared.selectedModel
+            let appGroup = AppGroupManager.shared
+            let selectedTier = appGroup.selectedModel
             if ModelDownloader.shared.isModelDownloaded(selectedTier) && whisperContext == nil && !isLoadingModel {
                 loadModel(selectedTier)
             } else if whisperContext == nil && !isLoadingModel,
                       let anyDownloaded = WhisperModelTier.allCases.first(where: {
                           ModelDownloader.shared.isModelDownloaded($0) &&
-                          HardwareDetector.isTierUnlocked($0, simulate4GB: AppGroupManager.shared.simulateModest4GBDevice)
+                          HardwareDetector.isTierUnlocked(
+                              $0,
+                              simulate4GB: appGroup.simulateModest4GBDevice,
+                              forceUnlock: appGroup.forceUnlockAllModels
+                          )
                       }) {
-                AppGroupManager.shared.selectedModel = anyDownloaded
+                appGroup.selectedModel = anyDownloaded
                 loadModel(anyDownloaded)
             }
 
+            if audioEngine.isRunning {
+                audioEngine.stop()
+            }
             let inputNode = audioEngine.inputNode
+            inputNode.removeTap(onBus: 0)
+
             let hardwareFormat = inputNode.outputFormat(forBus: 0)
 
             guard hardwareFormat.sampleRate > 0 && hardwareFormat.channelCount > 0 else {
@@ -340,7 +398,6 @@ public final class WhisperEngine: ObservableObject {
                 audioConverter = AVAudioConverter(from: hardwareFormat, to: targetFormat)
             }
 
-            inputNode.removeTap(onBus: 0)
             inputNode.installTap(onBus: 0, bufferSize: 2048, format: hardwareFormat) { [weak self] buffer, _ in
                 self?.processMicrophoneBuffer(buffer)
             }
@@ -393,15 +450,20 @@ public final class WhisperEngine: ObservableObject {
     }
 
     public func beginListeningSession() {
-        let tier = AppGroupManager.shared.selectedModel
+        let appGroup = AppGroupManager.shared
+        let tier = appGroup.selectedModel
         if whisperContext == nil && !isLoadingModel {
             if ModelDownloader.shared.isModelDownloaded(tier) {
                 loadModel(tier)
             } else if let fallback = WhisperModelTier.allCases.first(where: {
                 ModelDownloader.shared.isModelDownloaded($0) &&
-                HardwareDetector.isTierUnlocked($0, simulate4GB: AppGroupManager.shared.simulateModest4GBDevice)
+                HardwareDetector.isTierUnlocked(
+                    $0,
+                    simulate4GB: appGroup.simulateModest4GBDevice,
+                    forceUnlock: appGroup.forceUnlockAllModels
+                )
             }) {
-                AppGroupManager.shared.selectedModel = fallback
+                appGroup.selectedModel = fallback
                 loadModel(fallback)
             } else {
                 lastErrorMessage = "Veuillez d'abord télécharger l'un des modèles Whisper hors-ligne (Carte 2)."
@@ -426,6 +488,10 @@ public final class WhisperEngine: ObservableObject {
     }
 
     public func finishListeningAndTranscribe() {
+        guard AppGroupManager.shared.orbState == .listening, !isTranscribingNow else {
+            return
+        }
+
         audioBufferLock.lock()
         let capturedFrames = accumulatedSamples16kHz
         accumulatedSamples16kHz.removeAll(keepingCapacity: true)
@@ -498,6 +564,10 @@ public final class WhisperEngine: ObservableObject {
         if totalRecordedSeconds >= 28.0 {
             shouldTriggerAutoTranscribe = true
         }
+        if shouldTriggerAutoTranscribe {
+            hasSpokenEnoughInCurrentUtterance = false
+            currentSilenceDurationSeconds = 0.0
+        }
         audioBufferLock.unlock()
 
         if shouldTriggerAutoTranscribe {
@@ -510,25 +580,47 @@ public final class WhisperEngine: ObservableObject {
     private func convertBufferTo16kHzMonoFloat32(_ inputBuffer: AVAudioPCMBuffer) -> [Float] {
         let inputFormat = inputBuffer.format
         let frameLength = Int(inputBuffer.frameLength)
-        guard frameLength > 0, let channelData = inputBuffer.floatChannelData else { return [] }
+        guard frameLength > 0 else { return [] }
 
         let channelCount = Int(inputFormat.channelCount)
+        guard channelCount > 0 else { return [] }
         var monoSource = [Float](repeating: 0.0, count: frameLength)
 
-        if channelCount == 1 {
-            let ptr = channelData[0]
-            for i in 0..<frameLength {
-                monoSource[i] = ptr[i]
+        if let channelData = inputBuffer.floatChannelData {
+            if channelCount == 1 {
+                let ptr = channelData[0]
+                for i in 0..<frameLength {
+                    monoSource[i] = ptr[i]
+                }
+            } else {
+                let invChannels = 1.0 / Float(channelCount)
+                for i in 0..<frameLength {
+                    var sum: Float = 0.0
+                    for ch in 0..<channelCount {
+                        sum += channelData[ch][i]
+                    }
+                    monoSource[i] = sum * invChannels
+                }
+            }
+        } else if let int16Data = inputBuffer.int16ChannelData {
+            let scale: Float = 1.0 / 32768.0
+            if channelCount == 1 {
+                let ptr = int16Data[0]
+                for i in 0..<frameLength {
+                    monoSource[i] = Float(ptr[i]) * scale
+                }
+            } else {
+                let invChannels = scale / Float(channelCount)
+                for i in 0..<frameLength {
+                    var sum: Float = 0.0
+                    for ch in 0..<channelCount {
+                        sum += Float(int16Data[ch][i])
+                    }
+                    monoSource[i] = sum * invChannels
+                }
             }
         } else {
-            let invChannels = 1.0 / Float(channelCount)
-            for i in 0..<frameLength {
-                var sum: Float = 0.0
-                for ch in 0..<channelCount {
-                    sum += channelData[ch][i]
-                }
-                monoSource[i] = sum * invChannels
-            }
+            return []
         }
 
         let sourceSampleRate = inputFormat.sampleRate

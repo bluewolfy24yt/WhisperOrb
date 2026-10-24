@@ -3,6 +3,8 @@ import SwiftUI
 import Combine
 
 public final class KeyboardViewController: UIInputViewController {
+    public static let textDidChangeNotification = Notification.Name("com.bluewolfy24yt.whisperorb.keyboardTextDidChange")
+
     private var hostingController: UIHostingController<KeyboardLayoutView>?
     private var heightConstraint: NSLayoutConstraint?
     private var cancellables = Set<AnyCancellable>()
@@ -27,12 +29,17 @@ public final class KeyboardViewController: UIInputViewController {
         AppGroupManager.shared.reloadStateFromChannels()
         AppGroupManager.shared.startFastPolling()
         processPendingActionsIfNeeded()
+        NotificationCenter.default.post(name: Self.textDidChangeNotification, object: nil)
     }
 
     public override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         AppGroupManager.shared.stopFastPolling()
-        AppGroupManager.shared.persistAndBroadcastState(postDarwinNotification: false)
+    }
+
+    public override func textDidChange(_ textInput: UITextInput?) {
+        super.textDidChange(textInput)
+        NotificationCenter.default.post(name: Self.textDidChangeNotification, object: nil)
     }
 
     public override func viewWillLayoutSubviews() {
@@ -136,10 +143,12 @@ public final class KeyboardViewController: UIInputViewController {
 
     public func insertText(_ text: String) {
         textDocumentProxy.insertText(text)
+        NotificationCenter.default.post(name: Self.textDidChangeNotification, object: nil)
     }
 
     public func deleteBackward() {
         textDocumentProxy.deleteBackward()
+        NotificationCenter.default.post(name: Self.textDidChangeNotification, object: nil)
     }
 
     public func deleteLastDictatedSentence(length: Int) {
@@ -147,6 +156,8 @@ public final class KeyboardViewController: UIInputViewController {
         for _ in 0..<length {
             textDocumentProxy.deleteBackward()
         }
+        AppGroupManager.shared.clearLastInsertedSentenceLength()
+        NotificationCenter.default.post(name: Self.textDidChangeNotification, object: nil)
     }
 
     public func advanceToNextKeyboard() {

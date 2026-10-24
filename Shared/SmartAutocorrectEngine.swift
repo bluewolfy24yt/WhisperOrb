@@ -341,6 +341,14 @@ public final class SmartAutocorrectEngine {
         "w": (1.5, 2), "x": (2.5, 2), "c": (3.5, 2), "v": (4.5, 2), "b": (5.5, 2), "n": (6.5, 2)
     ]
 
+    private let keyCoordinatesQWERTY: [Character: (Double, Double)] = [
+        "q": (0, 0), "w": (1, 0), "e": (2, 0), "r": (3, 0), "t": (4, 0),
+        "y": (5, 0), "u": (6, 0), "i": (7, 0), "o": (8, 0), "p": (9, 0),
+        "a": (0.5, 1), "s": (1.5, 1), "d": (2.5, 1), "f": (3.5, 1), "g": (4.5, 1),
+        "h": (5.5, 1), "j": (6.5, 1), "k": (7.5, 1), "l": (8.5, 1),
+        "z": (1.5, 2), "x": (2.5, 2), "c": (3.5, 2), "v": (4.5, 2), "b": (5.5, 2), "n": (6.5, 2), "m": (7.5, 2)
+    ]
+
     private init() {}
 
     // MARK: - Calcul Principal des 3 Suggestions & Décision d'Autocorrection
@@ -461,26 +469,25 @@ public final class SmartAutocorrectEngine {
         let rankedGuesses = guesses
             .uniquedCaseInsensitive()
             .sorted { candidateA, candidateB in
-                geometricDistanceScore(typed: lowerTyped, candidate: candidateA.lowercased()) <
-                geometricDistanceScore(typed: lowerTyped, candidate: candidateB.lowercased())
+                geometricDistanceScore(typed: lowerTyped, candidate: candidateA.lowercased(), languageCode: lang) <
+                geometricDistanceScore(typed: lowerTyped, candidate: candidateB.lowercased(), languageCode: lang)
             }
 
         if let bestGuess = rankedGuesses.first {
             let casedBest = applyCasing(bestGuess, isCapitalized: isCapitalized, isAllCaps: isAllCaps)
-            let dist = geometricDistanceScore(typed: lowerTyped, candidate: bestGuess.lowercased())
-            // On remplace automatiquement à l'espace uniquement si la faute est très proche (1-2 lettres ou accent)
-            let autoReplace = dist <= 2.35 && currentPrefix.count >= 2
             let secondChoice = rankedGuesses.dropFirst().first
                 .map { applyCasing($0, isCapitalized: isCapitalized, isAllCaps: isAllCaps) }
                 ?? completions.first
                 ?? currentPrefix
 
+            // Ne jamais remplacer de force à l'espace les propositions géométriques/heuristiques :
+            // l'utilisateur peut cliquer dessus dans la barre des 3 choix s'il le souhaite.
             return AutocorrectSuggestionSet(
                 typedWord: currentPrefix,
                 primaryCorrection: casedBest,
                 secondaryPrediction: secondChoice,
                 tertiaryPrediction: completions.dropFirst().first ?? currentPrefix,
-                shouldAutoReplaceOnSpace: autoReplace
+                shouldAutoReplaceOnSpace: false
             )
         }
 
@@ -532,20 +539,21 @@ public final class SmartAutocorrectEngine {
     private func findGeometricClosestWords(to typed: String, languageCode: String) -> [String] {
         let words = frequentLexiconByLang[languageCode] ?? frequentLexiconByLang["en"]!
         return words.filter { abs($0.count - typed.count) <= 2 }
-            .filter { geometricDistanceScore(typed: typed, candidate: $0) <= 2.6 }
+            .filter { geometricDistanceScore(typed: typed, candidate: $0, languageCode: languageCode) <= 2.6 }
     }
 
-    private func geometricDistanceScore(typed: String, candidate: String) -> Double {
+    private func geometricDistanceScore(typed: String, candidate: String, languageCode: String = "fr") -> Double {
         let normTyped = stripDiacritics(typed)
         let normCand = stripDiacritics(candidate)
         if normTyped == normCand {
             return 0.25 // Simple accent ou apostrophe manquante -> priorité maximale !
         }
+        let coords = (languageCode == "fr") ? keyCoordinatesAZERTY : keyCoordinatesQWERTY
         let editDist = Double(levenshtein(normTyped, normCand))
         if normTyped.count == normCand.count {
             var keyPenalty = 0.0
             for (c1, c2) in zip(normTyped, normCand) where c1 != c2 {
-                if let p1 = keyCoordinatesAZERTY[c1], let p2 = keyCoordinatesAZERTY[c2] {
+                if let p1 = coords[c1], let p2 = coords[c2] {
                     let dx = p1.0 - p2.0
                     let dy = p1.1 - p2.1
                     let dist = sqrt(dx * dx + dy * dy)

@@ -27,7 +27,14 @@ struct WhisperOrbApp: App {
                         if !whisperEngine.isBackgroundEngineRunning {
                             whisperEngine.startBackgroundAudioEngine()
                         }
-                    } else if let anyTier = WhisperModelTier.allCases.first(where: { modelDownloader.isModelDownloaded($0) }) {
+                    } else if let anyTier = WhisperModelTier.allCases.first(where: {
+                        modelDownloader.isModelDownloaded($0) &&
+                        HardwareDetector.isTierUnlocked(
+                            $0,
+                            simulate4GB: appGroup.simulateModest4GBDevice,
+                            forceUnlock: appGroup.forceUnlockAllModels
+                        )
+                    }) {
                         appGroup.selectedModel = anyTier
                         whisperEngine.loadModel(anyTier)
                         if !whisperEngine.isBackgroundEngineRunning {

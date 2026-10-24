@@ -197,7 +197,7 @@ public struct KeyboardLayoutView: View {
     @State private var isHoldingBackspace: Bool = false
     @State private var backspaceRepeatTimer: Timer? = nil
 
-    // MARK: - Disposition Officielle Apple iOS AZERTY Français (4 Rangées Natives)
+    // MARK: - Dispositions Officielles Apple iOS AZERTY (FR) & QWERTY (International)
 
     private let row1LettersAZERTY: [String] = [
         "a", "z", "e", "r", "t", "y", "u", "i", "o", "p"
@@ -210,6 +210,22 @@ public struct KeyboardLayoutView: View {
     private let row3LettersWXCV: [String] = [
         "w", "x", "c", "v", "b", "n", "'"
     ]
+
+    private let row1LettersQWERTY: [String] = [
+        "q", "w", "e", "r", "t", "y", "u", "i", "o", "p"
+    ]
+
+    private let row2LettersASDF: [String] = [
+        "a", "s", "d", "f", "g", "h", "j", "k", "l"
+    ]
+
+    private let row3LettersZXCV: [String] = [
+        "z", "x", "c", "v", "b", "n", "m"
+    ]
+
+    private var isAZERTYLayout: Bool {
+        appGroup.selectedLanguage.effectiveStyleLanguageCode == "fr"
+    }
 
     private let row1Numbers: [String] = [
         "1", "2", "3", "4", "5", "6", "7", "8", "9", "0"
@@ -349,6 +365,9 @@ public struct KeyboardLayoutView: View {
         .onChange(of: appGroup.selectedLanguage) { _ in
             refreshAutocorrectSuggestions()
         }
+        .onReceive(NotificationCenter.default.publisher(for: KeyboardViewController.textDidChangeNotification)) { _ in
+            refreshAutocorrectSuggestions()
+        }
     }
 
     private var pressedRowIndex: Int {
@@ -363,7 +382,7 @@ public struct KeyboardLayoutView: View {
 
     private var activeRow1Keys: [String] {
         switch currentLayer {
-        case .letters, .emojis: return row1LettersAZERTY
+        case .letters, .emojis: return isAZERTYLayout ? row1LettersAZERTY : row1LettersQWERTY
         case .numbers: return row1Numbers
         case .symbols: return row1Symbols
         }
@@ -371,7 +390,7 @@ public struct KeyboardLayoutView: View {
 
     private var activeRow2Keys: [String] {
         switch currentLayer {
-        case .letters, .emojis: return row2LettersQSDF
+        case .letters, .emojis: return isAZERTYLayout ? row2LettersQSDF : row2LettersASDF
         case .numbers: return row2Numbers
         case .symbols: return row2Symbols
         }
@@ -379,7 +398,7 @@ public struct KeyboardLayoutView: View {
 
     private var activeRow3Keys: [String] {
         switch currentLayer {
-        case .letters, .emojis: return row3LettersWXCV
+        case .letters, .emojis: return isAZERTYLayout ? row3LettersWXCV : row3LettersZXCV
         case .numbers: return row3Numbers
         case .symbols: return row3Symbols
         }
@@ -561,7 +580,7 @@ public struct KeyboardLayoutView: View {
                 let length = appGroup.lastInsertedSentenceLength
                 if length > 0 {
                     onDeleteLastDictatedSentence(length)
-                    appGroup.lastInsertedSentenceLength = 0
+                    appGroup.clearLastInsertedSentenceLength()
                 } else {
                     onDeleteBackward()
                 }
@@ -689,7 +708,7 @@ public struct KeyboardLayoutView: View {
                 let length = appGroup.lastInsertedSentenceLength
                 if length > 0 {
                     onDeleteLastDictatedSentence(length)
-                    appGroup.lastInsertedSentenceLength = 0
+                    appGroup.clearLastInsertedSentenceLength()
                 } else {
                     onDeleteBackward()
                 }
@@ -863,6 +882,7 @@ public struct KeyboardLayoutView: View {
 
     private func applySuggestionCandidate(_ candidate: String, replaceCount: Int) {
         guard !candidate.isEmpty else { return }
+        appGroup.clearLastInsertedSentenceLength()
         if replaceCount > 0 {
             for _ in 0..<replaceCount {
                 onDeleteBackward()
@@ -884,10 +904,9 @@ public struct KeyboardLayoutView: View {
 
     private func refreshAutocorrectSuggestions() {
         let proxyContext = contextBeforeCursorProvider()
-        let activeContext = proxyContext.isEmpty ? localTypedContextBuffer : proxyContext
-        localTypedContextBuffer = activeContext
+        localTypedContextBuffer = proxyContext
         currentSuggestionSet = SmartAutocorrectEngine.shared.computeSuggestions(
-            contextBeforeCursor: activeContext,
+            contextBeforeCursor: proxyContext,
             languageCode: appGroup.selectedLanguage.effectiveStyleLanguageCode
         )
     }
@@ -895,124 +914,126 @@ public struct KeyboardLayoutView: View {
     // MARK: - Panneau Rapide de Langue, Modèle & Couleur
 
     private var quickColorAndModelSelectorPanel: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Langue de dictée")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(Color.white.opacity(0.68))
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Langue de dictée")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(Color.white.opacity(0.68))
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(WhisperLanguageSelection.allCases) { lang in
-                        let isSelected = (appGroup.selectedLanguage == lang)
-                        Button(action: {
-                            triggerLightHaptic()
-                            appGroup.selectedLanguage = lang
-                        }) {
-                            Text(lang.shortPillLabel)
-                                .font(.system(size: 12, weight: .semibold))
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(WhisperLanguageSelection.allCases) { lang in
+                            let isSelected = (appGroup.selectedLanguage == lang)
+                            Button(action: {
+                                triggerLightHaptic()
+                                appGroup.selectedLanguage = lang
+                            }) {
+                                Text(lang.shortPillLabel)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                            .fill(isSelected ? Color(hex: "#0A84FF") : Color(hex: "#2C2C2E"))
+                                    )
+                                    .foregroundColor(.white)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
+                Text("Modèle IA (Débloqué selon la RAM)")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(Color.white.opacity(0.68))
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(WhisperModelTier.allCases) { tier in
+                            let isUnlocked = HardwareDetector.isTierUnlocked(tier, simulate4GB: appGroup.simulateModest4GBDevice, forceUnlock: appGroup.forceUnlockAllModels)
+                            let isSelected = (appGroup.selectedModel == tier)
+                            Button(action: {
+                                guard isUnlocked else { return }
+                                triggerLightHaptic()
+                                appGroup.selectedModel = tier
+                            }) {
+                                VStack(spacing: 2) {
+                                    Text(isUnlocked ? tier.shortBadgeName : "🔒 \(tier.shortBadgeName)")
+                                        .font(.system(size: 11, weight: .semibold))
+                                    Text(isUnlocked ? tier.latencyDescription : tier.requiredRAMBadgeText)
+                                        .font(.system(size: 9, weight: .regular))
+                                        .opacity(0.75)
+                                }
                                 .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
+                                .padding(.vertical, 5)
                                 .background(
                                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .fill(isSelected ? Color(hex: "#0A84FF") : Color(hex: "#2C2C2E"))
+                                        .fill(isSelected ? Color(hex: "#0A84FF") : Color(hex: "#2C2C2E").opacity(isUnlocked ? 1.0 : 0.45))
                                 )
+                                .foregroundColor(isUnlocked ? .white : Color.white.opacity(0.45))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        Button(action: {
+                            triggerLightHaptic()
+                            appGroup.bgHex = "#050507"
+                            appGroup.fgHex = "#050507"
+                        }) {
+                            Text("Éclipse")
+                                .font(.system(size: 11, weight: .medium))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(RoundedRectangle(cornerRadius: 8).fill(Color(hex: "#2C2C2E")))
                                 .foregroundColor(.white)
                         }
                         .buttonStyle(.plain)
-                    }
-                }
-            }
 
-            Text("Modèle IA (Débloqué selon la RAM)")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(Color.white.opacity(0.68))
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(WhisperModelTier.allCases) { tier in
-                        let isUnlocked = HardwareDetector.isTierUnlocked(tier, simulate4GB: appGroup.simulateModest4GBDevice, forceUnlock: appGroup.forceUnlockAllModels)
-                        let isSelected = (appGroup.selectedModel == tier)
-                        Button(action: {
-                            guard isUnlocked else { return }
-                            triggerLightHaptic()
-                            appGroup.selectedModel = tier
-                        }) {
-                            VStack(spacing: 2) {
-                                Text(isUnlocked ? tier.shortBadgeName : "🔒 \(tier.shortBadgeName)")
-                                    .font(.system(size: 11, weight: .semibold))
-                                Text(isUnlocked ? tier.latencyDescription : tier.requiredRAMBadgeText)
-                                    .font(.system(size: 9, weight: .regular))
-                                    .opacity(0.75)
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .fill(isSelected ? Color(hex: "#0A84FF") : Color(hex: "#2C2C2E").opacity(isUnlocked ? 1.0 : 0.45))
-                            )
-                            .foregroundColor(isUnlocked ? .white : Color.white.opacity(0.45))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    Button(action: {
-                        triggerLightHaptic()
-                        appGroup.bgHex = "#050507"
-                        appGroup.fgHex = "#050507"
-                    }) {
-                        Text("Éclipse")
-                            .font(.system(size: 11, weight: .medium))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(RoundedRectangle(cornerRadius: 8).fill(Color(hex: "#2C2C2E")))
-                            .foregroundColor(.white)
-                    }
-                    .buttonStyle(.plain)
-
-                    Button(action: {
-                        triggerLightHaptic()
-                        appGroup.bgHex = "#F8F9FA"
-                        appGroup.fgHex = "#FFFFFF"
-                    }) {
-                        Text("Perle")
-                            .font(.system(size: 11, weight: .medium))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(RoundedRectangle(cornerRadius: 8).fill(Color(hex: "#F8F9FA")))
-                            .foregroundColor(Color(hex: "#1C1C1E"))
-                    }
-                    .buttonStyle(.plain)
-
-                    ForEach(ThemeColors.orderedForegrounds) { preset in
                         Button(action: {
                             triggerLightHaptic()
-                            if appGroup.bgHex == "#F8F9FA" && preset.id != "white" {
-                                appGroup.bgHex = "#08080C"
-                            }
-                            appGroup.fgHex = preset.hex
+                            appGroup.bgHex = "#F8F9FA"
+                            appGroup.fgHex = "#FFFFFF"
                         }) {
-                            HStack(spacing: 6) {
-                                Circle()
-                                    .fill(Color(hex: preset.hex))
-                                    .frame(width: 12, height: 12)
-                                Text(preset.name.components(separatedBy: " ").first ?? preset.name)
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundColor(.white)
-                            }
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 6)
-                            .background(RoundedRectangle(cornerRadius: 8).fill(Color(hex: "#2C2C2E")))
+                            Text("Perle")
+                                .font(.system(size: 11, weight: .medium))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(RoundedRectangle(cornerRadius: 8).fill(Color(hex: "#F8F9FA")))
+                                .foregroundColor(Color(hex: "#1C1C1E"))
                         }
                         .buttonStyle(.plain)
+
+                        ForEach(ThemeColors.orderedForegrounds) { preset in
+                            Button(action: {
+                                triggerLightHaptic()
+                                if appGroup.bgHex == "#F8F9FA" && preset.id != "white" {
+                                    appGroup.bgHex = "#08080C"
+                                }
+                                appGroup.fgHex = preset.hex
+                            }) {
+                                HStack(spacing: 6) {
+                                    Circle()
+                                        .fill(Color(hex: preset.hex))
+                                        .frame(width: 12, height: 12)
+                                    Text(preset.name.components(separatedBy: " ").first ?? preset.name)
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundColor(.white)
+                                }
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 5)
+                                .background(RoundedRectangle(cornerRadius: 8).fill(Color(hex: "#2C2C2E")))
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 }
             }
+            .padding(8)
         }
-        .padding(10)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -1265,6 +1286,7 @@ public struct KeyboardLayoutView: View {
         activeVariants = []
         selectedVariantIndex = 0
 
+        appGroup.clearLastInsertedSentenceLength()
         onInsertText(textToInsert)
         localTypedContextBuffer += textToInsert
         refreshAutocorrectSuggestions()
@@ -1333,11 +1355,11 @@ public struct KeyboardLayoutView: View {
             }
             .buttonStyle(.plain)
 
-            // Barre d'Espace Apple ("espace", double-tap insère ". ")
+            // Barre d'Espace Apple ("espace" / "space", double-tap insère ". ")
             Button(action: {
                 handleSpacebarTap()
             }) {
-                Text("espace")
+                Text(isAZERTYLayout ? "espace" : "space")
                     .font(.system(size: isIPad ? 16 : 15, weight: .regular))
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
@@ -1350,15 +1372,18 @@ public struct KeyboardLayoutView: View {
             }
             .buttonStyle(.plain)
 
-            // Touche Retour ("retour")
+            // Touche Retour ("retour" / "return")
             Button(action: {
                 triggerLightHaptic()
+                appGroup.clearLastInsertedSentenceLength()
                 onInsertText("\n")
+                localTypedContextBuffer += "\n"
                 if shiftState == .lowercased {
                     shiftState = .uppercased
                 }
+                refreshAutocorrectSuggestions()
             }) {
-                Text("retour")
+                Text(isAZERTYLayout ? "retour" : "return")
                     .font(.system(size: isIPad ? 16 : 15, weight: .regular))
                     .foregroundColor(.white)
                     .frame(width: isIPad ? 96 : 80, height: isIPad ? 45 : 42)
@@ -1417,8 +1442,14 @@ public struct KeyboardLayoutView: View {
 
     private func handleSpacebarTap() {
         triggerLightHaptic()
+        appGroup.clearLastInsertedSentenceLength()
         let now = Date()
-        if now.timeIntervalSince(lastSpaceTapTime) < 0.30 && currentSuggestionSet.typedWord.isEmpty {
+        let currentContext = contextBeforeCursorProvider()
+        let lastChar = currentContext.last
+        let secondLastChar = currentContext.dropLast().last
+        let canInsertDoubleSpacePeriod = (lastChar == " " && secondLastChar != nil && secondLastChar != "." && secondLastChar != " " && secondLastChar != "\n")
+
+        if now.timeIntervalSince(lastSpaceTapTime) < 0.30 && currentSuggestionSet.typedWord.isEmpty && canInsertDoubleSpacePeriod {
             onDeleteBackward()
             if !localTypedContextBuffer.isEmpty {
                 localTypedContextBuffer.removeLast()
@@ -1431,7 +1462,8 @@ public struct KeyboardLayoutView: View {
             lastSpaceTapTime = .distantPast
             refreshAutocorrectSuggestions()
         } else {
-            // Application automatique de la correction IA si activée (ex: "jarrive" -> "j'arrive ", "cest" -> "c'est ")
+            // Application automatique sur Espace UNIQUEMENT pour les corrections évidentes d'apostrophe/accent
+            // ou les abréviations personnelles de l'utilisateur (ex: "jarrive" -> "j'arrive ", "cest" -> "c'est ")
             let s = currentSuggestionSet
             if appGroup.isSmartAutocorrectEnabled && s.shouldAutoReplaceOnSpace && !s.typedWord.isEmpty {
                 applySuggestionCandidate(s.primaryCorrection, replaceCount: s.typedWord.count)
@@ -1447,6 +1479,7 @@ public struct KeyboardLayoutView: View {
     private func startBackspaceRepeat() {
         isHoldingBackspace = true
         triggerLightHaptic()
+        appGroup.clearLastInsertedSentenceLength()
         onDeleteBackward()
         if !localTypedContextBuffer.isEmpty {
             localTypedContextBuffer.removeLast()

@@ -741,6 +741,10 @@ public final class AppGroupManager: ObservableObject {
             if FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: dynamicCandidate) != nil {
                 return dynamicCandidate
             }
+            if FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: fallbackGroup) != nil {
+                return fallbackGroup
+            }
+            return dynamicCandidate
         }
         return fallbackGroup
     }()
@@ -842,10 +846,15 @@ public final class AppGroupManager: ObservableObject {
     private var lastToggleTriggerTime: TimeInterval = 0
     private var lastAudioBroadcastTime: TimeInterval = 0
 
+    private var isKeyboardExtensionProcess: Bool {
+        Bundle.main.bundlePath.hasSuffix(".appex")
+    }
+
     private enum Keys {
         static let hasLaunchedBefore = "whisperorb.hasLaunchedBefore"
         static let sharedPayloadData = "whisperorb.sharedPayloadData"
         static let liveAudioLevel = "whisperorb.liveAudioLevel"
+        static let toggleRecordingRequestCount = "whisperorb.toggleRecordingRequestCount"
         static let sharedFileName = "whisperorb_shared_state.json"
         static let recentEmojisList = "whisperorb.recentEmojisList"
     }
@@ -860,6 +869,14 @@ public final class AppGroupManager: ObservableObject {
         if let savedEmojis = userDefaults.stringArray(forKey: Keys.recentEmojisList), !savedEmojis.isEmpty {
             self.recentEmojis = savedEmojis
         }
+
+        // Initialise le compteur d'enregistrement existant pour ne jamais déclencher un faux toggle à l'ouverture
+        let existingToggleCount = max(
+            userDefaults.integer(forKey: Keys.toggleRecordingRequestCount),
+            readFreshestPayload()?.toggleRecordingRequestCount ?? 0
+        )
+        self.toggleRecordingRequestCount = existingToggleCount
+        self.lastHandledToggleRequestCount = existingToggleCount
 
         if !userDefaults.bool(forKey: Keys.hasLaunchedBefore) {
             self.selectedModel = HardwareDetector.recommendedTier
@@ -918,9 +935,57 @@ public final class AppGroupManager: ObservableObject {
 
     // MARK: - Sauvegarde et Diffusion Événementielle
 
+    private func readFreshestPayload() -> WhisperSharedStatePayload? {
+        let decoder = JSONDecoder()
+        var freshest: WhisperSharedStatePayload? = nil
+
+        if let defaultsData = userDefaults.data(forKey: Keys.sharedPayloadData),
+           let payload = try? decoder.decode(WhisperSharedStatePayload.self, from: defaultsData) {
+            freshest = payload
+        }
+
+        if let fileData = try? Data(contentsOf: sharedStateFileURL),
+           let filePayload = try? decoder.decode(WhisperSharedStatePayload.self, from: fileData) {
+            if let current = freshest {
+                if filePayload.updatedAt >= current.updatedAt {
+                    freshest = filePayload
+                }
+            } else {
+                freshest = filePayload
+            }
+        }
+
+        return freshest
+    }
+
+    private func writePayload(_ payload: WhisperSharedStatePayload) {
+        guard let encoded = try? JSONEncoder().encode(payload) else { return }
+        userDefaults.set(encoded, forKey: Keys.sharedPayloadData)
+        try? encoded.write(to: sharedStateFileURL, options: [.atomic])
+    }
+
     public func persistAndBroadcastState(postDarwinNotification: Bool = true) {
         let now = Date().timeIntervalSince1970
         lastAppliedTimestamp = now
+
+        let existing = readFreshestPayload()
+        let latestToggleCount = max(
+            toggleRecordingRequestCount,
+            userDefaults.integer(forKey: Keys.toggleRecordingRequestCount),
+            existing?.toggleRecordingRequestCount ?? 0
+        )
+        toggleRecordingRequestCount = latestToggleCount
+
+        // Le clavier ne doit jamais écraser l'état temps réel du moteur audio de l'app principale
+        let authoritativeOrbStateRaw = isKeyboardExtensionProcess
+            ? (existing?.orbStateRaw ?? orbState.rawValue)
+            : orbState.rawValue
+        let authoritativeAudioLevel = isKeyboardExtensionProcess
+            ? (existing?.currentAudioLevel ?? currentAudioLevel)
+            : currentAudioLevel
+        let authoritativeBgEngineActive = isKeyboardExtensionProcess
+            ? (existing?.isBackgroundEngineActive ?? isBackgroundEngineActive)
+            : isBackgroundEngineActive
 
         let payload = WhisperSharedStatePayload(
             bgHex: bgHex,
@@ -929,25 +994,22 @@ public final class AppGroupManager: ObservableObject {
             selectedLanguageRaw: selectedLanguage.rawValue,
             simulateModest4GBDevice: simulateModest4GBDevice,
             forceUnlockAllModels: forceUnlockAllModels,
-            orbStateRaw: orbState.rawValue,
-            currentAudioLevel: currentAudioLevel,
+            orbStateRaw: authoritativeOrbStateRaw,
+            currentAudioLevel: authoritativeAudioLevel,
             pendingTranscribedText: pendingTranscribedText,
             lastInsertedSentenceLength: lastInsertedSentenceLength,
             shouldDeleteLastSentence: shouldDeleteLastSentence,
             autoSpaceForGoodnotes: autoSpaceForGoodnotes,
             autoPunctuation: autoPunctuation,
             vadSilenceThresholdSeconds: vadSilenceThresholdSeconds,
-            isBackgroundEngineActive: isBackgroundEngineActive,
+            isBackgroundEngineActive: authoritativeBgEngineActive,
             isKeyboardCollapsed: isKeyboardCollapsed,
             isSmartAutocorrectEnabled: isSmartAutocorrectEnabled,
-            toggleRecordingRequestCount: toggleRecordingRequestCount,
+            toggleRecordingRequestCount: latestToggleCount,
             updatedAt: now
         )
 
-        guard let encoded = try? JSONEncoder().encode(payload) else { return }
-
-        userDefaults.set(encoded, forKey: Keys.sharedPayloadData)
-        try? encoded.write(to: sharedStateFileURL, options: [.atomic])
+        writePayload(payload)
 
         if postDarwinNotification {
             postDarwinNotificationNamed(Self.darwinStateUpdatedNotification)
@@ -976,6 +1038,7 @@ public final class AppGroupManager: ObservableObject {
     }
 
     private func reloadLiveAudioLevelOnly() {
+        guard isKeyboardExtensionProcess else { return }
         let level = userDefaults.float(forKey: Keys.liveAudioLevel)
         if abs(self.currentAudioLevel - level) > 0.01 {
             if Thread.isMainThread {
@@ -989,41 +1052,23 @@ public final class AppGroupManager: ObservableObject {
     }
 
     public func reloadStateFromChannels() {
-        let decoder = JSONDecoder()
-        var freshest: WhisperSharedStatePayload? = nil
-
-        if let defaultsData = userDefaults.data(forKey: Keys.sharedPayloadData),
-           let payload = try? decoder.decode(WhisperSharedStatePayload.self, from: defaultsData) {
-            freshest = payload
-        }
-
-        if let fileData = try? Data(contentsOf: sharedStateFileURL),
-           let filePayload = try? decoder.decode(WhisperSharedStatePayload.self, from: fileData) {
-            if let current = freshest {
-                if filePayload.updatedAt > current.updatedAt {
-                    freshest = filePayload
-                }
-            } else {
-                freshest = filePayload
-            }
-        }
-
-        guard let validPayload = freshest else {
+        guard let validPayload = readFreshestPayload() else {
             return
         }
 
-        let remoteToggleCount = validPayload.toggleRecordingRequestCount ?? 0
+        let remoteToggleCount = max(
+            validPayload.toggleRecordingRequestCount ?? 0,
+            userDefaults.integer(forKey: Keys.toggleRecordingRequestCount)
+        )
         var shouldFireToggleCallback = false
         if remoteToggleCount > self.toggleRecordingRequestCount {
             self.toggleRecordingRequestCount = remoteToggleCount
-            if remoteToggleCount > self.lastHandledToggleRequestCount {
-                self.lastHandledToggleRequestCount = remoteToggleCount
+        }
+        if remoteToggleCount > self.lastHandledToggleRequestCount {
+            self.lastHandledToggleRequestCount = remoteToggleCount
+            if !isKeyboardExtensionProcess {
                 shouldFireToggleCallback = true
             }
-        }
-
-        guard validPayload.updatedAt >= lastAppliedTimestamp || shouldFireToggleCallback else {
-            return
         }
 
         lastAppliedTimestamp = max(lastAppliedTimestamp, validPayload.updatedAt)
@@ -1054,11 +1099,16 @@ public final class AppGroupManager: ObservableObject {
             if let forceUnlock = validPayload.forceUnlockAllModels, self.forceUnlockAllModels != forceUnlock {
                 self.forceUnlockAllModels = forceUnlock
             }
-            if let state = WhisperOrbState(rawValue: validPayload.orbStateRaw), self.orbState != state {
-                self.orbState = state
-            }
-            if abs(self.currentAudioLevel - validPayload.currentAudioLevel) > 0.005 {
-                self.currentAudioLevel = validPayload.currentAudioLevel
+            if self.isKeyboardExtensionProcess {
+                if let state = WhisperOrbState(rawValue: validPayload.orbStateRaw), self.orbState != state {
+                    self.orbState = state
+                }
+                if abs(self.currentAudioLevel - validPayload.currentAudioLevel) > 0.005 {
+                    self.currentAudioLevel = validPayload.currentAudioLevel
+                }
+                if self.isBackgroundEngineActive != validPayload.isBackgroundEngineActive {
+                    self.isBackgroundEngineActive = validPayload.isBackgroundEngineActive
+                }
             }
             if self.pendingTranscribedText != validPayload.pendingTranscribedText {
                 self.pendingTranscribedText = validPayload.pendingTranscribedText
@@ -1078,9 +1128,6 @@ public final class AppGroupManager: ObservableObject {
             if abs(self.vadSilenceThresholdSeconds - validPayload.vadSilenceThresholdSeconds) > 0.01 {
                 self.vadSilenceThresholdSeconds = validPayload.vadSilenceThresholdSeconds
             }
-            if self.isBackgroundEngineActive != validPayload.isBackgroundEngineActive {
-                self.isBackgroundEngineActive = validPayload.isBackgroundEngineActive
-            }
             if let remoteCollapsed = validPayload.isKeyboardCollapsed, self.isKeyboardCollapsed != remoteCollapsed {
                 self.isKeyboardCollapsed = remoteCollapsed
             }
@@ -1097,16 +1144,32 @@ public final class AppGroupManager: ObservableObject {
     }
 
     private func dispatchDebouncedToggleRecording() {
+        guard !isKeyboardExtensionProcess else { return }
         let now = Date().timeIntervalSince1970
-        guard now - lastToggleTriggerTime > 0.25 else { return }
+        guard now - lastToggleTriggerTime > 0.45 else { return }
         lastToggleTriggerTime = now
         onToggleRecordingRequested?()
     }
 
     public func requestToggleRecordingFromKeyboard() {
-        toggleRecordingRequestCount += 1
-        lastHandledToggleRequestCount = toggleRecordingRequestCount
-        persistAndBroadcastState(postDarwinNotification: true)
+        let baseCount = max(
+            toggleRecordingRequestCount,
+            userDefaults.integer(forKey: Keys.toggleRecordingRequestCount),
+            readFreshestPayload()?.toggleRecordingRequestCount ?? 0
+        )
+        let nextCount = baseCount + 1
+        toggleRecordingRequestCount = nextCount
+        lastHandledToggleRequestCount = nextCount
+        userDefaults.set(nextCount, forKey: Keys.toggleRecordingRequestCount)
+
+        if var payload = readFreshestPayload() {
+            payload.toggleRecordingRequestCount = nextCount
+            payload.updatedAt = Date().timeIntervalSince1970
+            writePayload(payload)
+        } else {
+            persistAndBroadcastState(postDarwinNotification: false)
+        }
+
         postDarwinNotificationNamed(Self.darwinToggleRecordingNotification)
     }
 
@@ -1148,7 +1211,14 @@ public final class AppGroupManager: ObservableObject {
         isApplyingRemoteUpdate = true
         pendingTranscribedText = ""
         isApplyingRemoteUpdate = false
-        persistAndBroadcastState(postDarwinNotification: false)
+
+        if var payload = readFreshestPayload() {
+            payload.pendingTranscribedText = ""
+            payload.updatedAt = Date().timeIntervalSince1970
+            writePayload(payload)
+        } else {
+            persistAndBroadcastState(postDarwinNotification: false)
+        }
         return textToInsert
     }
 
@@ -1175,8 +1245,31 @@ public final class AppGroupManager: ObservableObject {
         shouldDeleteLastSentence = false
         lastInsertedSentenceLength = 0
         isApplyingRemoteUpdate = false
-        persistAndBroadcastState(postDarwinNotification: false)
+
+        if var payload = readFreshestPayload() {
+            payload.shouldDeleteLastSentence = false
+            payload.lastInsertedSentenceLength = 0
+            payload.updatedAt = Date().timeIntervalSince1970
+            writePayload(payload)
+        } else {
+            persistAndBroadcastState(postDarwinNotification: false)
+        }
         return length
+    }
+
+    public func clearLastInsertedSentenceLength() {
+        guard lastInsertedSentenceLength != 0 || shouldDeleteLastSentence else { return }
+        isApplyingRemoteUpdate = true
+        lastInsertedSentenceLength = 0
+        shouldDeleteLastSentence = false
+        isApplyingRemoteUpdate = false
+
+        if var payload = readFreshestPayload() {
+            payload.lastInsertedSentenceLength = 0
+            payload.shouldDeleteLastSentence = false
+            payload.updatedAt = Date().timeIntervalSince1970
+            writePayload(payload)
+        }
     }
 
     // MARK: - Notifications Système Darwin
@@ -1192,7 +1285,15 @@ public final class AppGroupManager: ObservableObject {
                 guard let observer = observer else { return }
                 let manager = Unmanaged<AppGroupManager>.fromOpaque(observer).takeUnretainedValue()
                 DispatchQueue.main.async {
-                    manager.reloadStateFromChannels()
+                    guard !manager.isKeyboardExtensionProcess else { return }
+                    let remoteCount = max(
+                        manager.userDefaults.integer(forKey: Keys.toggleRecordingRequestCount),
+                        manager.readFreshestPayload()?.toggleRecordingRequestCount ?? 0
+                    )
+                    if remoteCount > manager.toggleRecordingRequestCount {
+                        manager.toggleRecordingRequestCount = remoteCount
+                    }
+                    manager.lastHandledToggleRequestCount = manager.toggleRecordingRequestCount
                     manager.dispatchDebouncedToggleRecording()
                 }
             },
