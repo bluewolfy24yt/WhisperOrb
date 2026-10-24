@@ -175,6 +175,7 @@ public struct KeyboardLayoutView: View {
     public let onDeleteBackward: () -> Void
     public let onDeleteLastDictatedSentence: (Int) -> Void
     public let onAdvanceToNextKeyboard: () -> Void
+    public let onOpenParentApp: () -> Void
     public let contextBeforeCursorProvider: () -> String
 
     @State private var currentLayer: KeyboardLayer = .letters
@@ -182,6 +183,7 @@ public struct KeyboardLayoutView: View {
     @State private var shiftState: ShiftState = .uppercased
     @State private var lastShiftTapTime: Date = .distantPast
     @State private var lastSpaceTapTime: Date = .distantPast
+    @State private var lastLocalEditTime: Date = .distantPast
     @State private var showQuickOrbPopover: Bool = false
     @State private var localTypedContextBuffer: String = ""
     @State private var currentSuggestionSet: AutocorrectSuggestionSet = .empty
@@ -192,10 +194,12 @@ public struct KeyboardLayoutView: View {
     @State private var activeVariants: [String] = []
     @State private var selectedVariantIndex: Int = 0
     @State private var longPressTimer: Timer? = nil
+    @GestureState private var isCharacterKeyTouchActive: Bool = false
 
-    // Répétition automatique de la touche ⌫ Suppr
+    // Répétition automatique de la touche ⌫ Suppr (protégée contre l'annulation système du toucher)
     @State private var isHoldingBackspace: Bool = false
     @State private var backspaceRepeatTimer: Timer? = nil
+    @GestureState private var isBackspaceTouchActive: Bool = false
 
     // MARK: - Dispositions Officielles Apple iOS AZERTY (FR) & QWERTY (International)
 
@@ -306,12 +310,14 @@ public struct KeyboardLayoutView: View {
         onDeleteBackward: @escaping () -> Void,
         onDeleteLastDictatedSentence: @escaping (Int) -> Void,
         onAdvanceToNextKeyboard: @escaping () -> Void,
+        onOpenParentApp: @escaping () -> Void = {},
         contextBeforeCursorProvider: @escaping () -> String = { "" }
     ) {
         self.onInsertText = onInsertText
         self.onDeleteBackward = onDeleteBackward
         self.onDeleteLastDictatedSentence = onDeleteLastDictatedSentence
         self.onAdvanceToNextKeyboard = onAdvanceToNextKeyboard
+        self.onOpenParentApp = onOpenParentApp
         self.contextBeforeCursorProvider = contextBeforeCursorProvider
     }
 
@@ -360,13 +366,27 @@ public struct KeyboardLayoutView: View {
             }
         }
         .onAppear {
-            refreshAutocorrectSuggestions()
+            syncContextFromDocumentProxy(force: true)
+        }
+        .onDisappear {
+            stopBackspaceRepeat()
+            cancelKeyPress()
+        }
+        .onChange(of: isBackspaceTouchActive) { active in
+            if !active && isHoldingBackspace {
+                stopBackspaceRepeat()
+            }
+        }
+        .onChange(of: isCharacterKeyTouchActive) { active in
+            if !active && pressedKeyID != nil {
+                cancelKeyPress()
+            }
         }
         .onChange(of: appGroup.selectedLanguage) { _ in
-            refreshAutocorrectSuggestions()
+            refreshAutocorrectSuggestions(preferLocalBuffer: true)
         }
         .onReceive(NotificationCenter.default.publisher(for: KeyboardViewController.textDidChangeNotification)) { _ in
-            refreshAutocorrectSuggestions()
+            syncContextFromDocumentProxy(force: false)
         }
     }
 
@@ -430,6 +450,8 @@ public struct KeyboardLayoutView: View {
                         Button(action: {
                             triggerLightHaptic()
                             onInsertText(emoji)
+                            localTypedContextBuffer += emoji
+                            lastLocalEditTime = Date()
                             appGroup.recordUsedEmoji(emoji)
                         }) {
                             Text(emoji)
@@ -493,6 +515,9 @@ public struct KeyboardLayoutView: View {
                     )
                     .gesture(
                         DragGesture(minimumDistance: 0)
+                            .updating($isBackspaceTouchActive) { _, state, _ in
+                                state = true
+                            }
                             .onChanged { _ in
                                 if !isHoldingBackspace {
                                     startBackspaceRepeat()
@@ -551,9 +576,7 @@ public struct KeyboardLayoutView: View {
             .buttonStyle(.plain)
 
             Button(action: {
-                let generator = UIImpactFeedbackGenerator(style: .medium)
-                generator.impactOccurred()
-                appGroup.requestToggleRecordingFromKeyboard()
+                handleVoiceDictationTrigger()
             }) {
                 HStack(spacing: 6) {
                     Circle()
@@ -583,6 +606,11 @@ public struct KeyboardLayoutView: View {
                     appGroup.clearLastInsertedSentenceLength()
                 } else {
                     onDeleteBackward()
+                    if !localTypedContextBuffer.isEmpty {
+                        localTypedContextBuffer.removeLast()
+                    }
+                    lastLocalEditTime = Date()
+                    refreshAutocorrectSuggestions(preferLocalBuffer: true)
                 }
             }) {
                 Image(systemName: "arrow.uturn.backward")
@@ -606,6 +634,9 @@ public struct KeyboardLayoutView: View {
                 )
                 .gesture(
                     DragGesture(minimumDistance: 0)
+                        .updating($isBackspaceTouchActive) { _, state, _ in
+                            state = true
+                        }
                         .onChanged { _ in
                             if !isHoldingBackspace {
                                 startBackspaceRepeat()
@@ -624,9 +655,7 @@ public struct KeyboardLayoutView: View {
                 size: isIPad ? 44 : 40,
                 showSideTab: false,
                 onTap: {
-                    let generator = UIImpactFeedbackGenerator(style: .medium)
-                    generator.impactOccurred()
-                    appGroup.requestToggleRecordingFromKeyboard()
+                    handleVoiceDictationTrigger()
                 }
             )
             .contentShape(Circle())
@@ -663,9 +692,7 @@ public struct KeyboardLayoutView: View {
             .buttonStyle(.plain)
 
             Button(action: {
-                let generator = UIImpactFeedbackGenerator(style: .medium)
-                generator.impactOccurred()
-                appGroup.requestToggleRecordingFromKeyboard()
+                handleVoiceDictationTrigger()
             }) {
                 HStack(spacing: 6) {
                     Circle()
@@ -711,6 +738,11 @@ public struct KeyboardLayoutView: View {
                     appGroup.clearLastInsertedSentenceLength()
                 } else {
                     onDeleteBackward()
+                    if !localTypedContextBuffer.isEmpty {
+                        localTypedContextBuffer.removeLast()
+                    }
+                    lastLocalEditTime = Date()
+                    refreshAutocorrectSuggestions(preferLocalBuffer: true)
                 }
             }) {
                 Image(systemName: "arrow.uturn.backward")
@@ -746,9 +778,7 @@ public struct KeyboardLayoutView: View {
                 size: isIPad ? 42 : 38,
                 showSideTab: false,
                 onTap: {
-                    let generator = UIImpactFeedbackGenerator(style: .medium)
-                    generator.impactOccurred()
-                    appGroup.requestToggleRecordingFromKeyboard()
+                    handleVoiceDictationTrigger()
                 }
             )
             .contentShape(Circle())
@@ -761,6 +791,16 @@ public struct KeyboardLayoutView: View {
             }
         }
         .padding(.horizontal, 3)
+    }
+
+    private func handleVoiceDictationTrigger() {
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.impactOccurred()
+        appGroup.reloadStateFromChannels()
+        appGroup.requestToggleRecordingFromKeyboard()
+        if !appGroup.isBackgroundEngineActive {
+            onOpenParentApp()
+        }
     }
 
     private var collapsedStatusTitle: String {
@@ -823,7 +863,8 @@ public struct KeyboardLayoutView: View {
                     // Garde littéralement le mot tapé sans correction
                     onInsertText(" ")
                     localTypedContextBuffer += " "
-                    refreshAutocorrectSuggestions()
+                    lastLocalEditTime = Date()
+                    refreshAutocorrectSuggestions(preferLocalBuffer: true)
                 }
             }) {
                 Text(leftTitle)
@@ -896,17 +937,40 @@ public struct KeyboardLayoutView: View {
         let committed = candidate + " "
         onInsertText(committed)
         localTypedContextBuffer += committed
+        lastLocalEditTime = Date()
         if shiftState == .uppercased {
             shiftState = .lowercased
         }
-        refreshAutocorrectSuggestions()
+        refreshAutocorrectSuggestions(preferLocalBuffer: true)
     }
 
-    private func refreshAutocorrectSuggestions() {
+    private func syncContextFromDocumentProxy(force: Bool) {
         let proxyContext = contextBeforeCursorProvider()
-        localTypedContextBuffer = proxyContext
+        if force || Date().timeIntervalSince(lastLocalEditTime) > 0.25 || localTypedContextBuffer.isEmpty {
+            localTypedContextBuffer = proxyContext
+        }
+        updateAutoShiftForContext(localTypedContextBuffer)
+        refreshAutocorrectSuggestions(preferLocalBuffer: true)
+    }
+
+    private func updateAutoShiftForContext(_ context: String) {
+        guard shiftState != .capsLocked else { return }
+        if context.isEmpty || context.hasSuffix("\n") || context.hasSuffix(". ") || context.hasSuffix("! ") || context.hasSuffix("? ") {
+            shiftState = .uppercased
+        }
+    }
+
+    private func refreshAutocorrectSuggestions(preferLocalBuffer: Bool = true) {
+        let effectiveContext: String
+        if preferLocalBuffer && !localTypedContextBuffer.isEmpty {
+            effectiveContext = localTypedContextBuffer
+        } else {
+            let proxyContext = contextBeforeCursorProvider()
+            localTypedContextBuffer = proxyContext
+            effectiveContext = proxyContext
+        }
         currentSuggestionSet = SmartAutocorrectEngine.shared.computeSuggestions(
-            contextBeforeCursor: proxyContext,
+            contextBeforeCursor: effectiveContext,
             languageCode: appGroup.selectedLanguage.effectiveStyleLanguageCode
         )
     }
@@ -951,16 +1015,21 @@ public struct KeyboardLayoutView: View {
                     HStack(spacing: 6) {
                         ForEach(WhisperModelTier.allCases) { tier in
                             let isUnlocked = HardwareDetector.isTierUnlocked(tier, simulate4GB: appGroup.simulateModest4GBDevice, forceUnlock: appGroup.forceUnlockAllModels)
+                            let isDownloaded = appGroup.downloadedModelRaws.isEmpty || appGroup.downloadedModelRaws.contains(tier.rawValue)
                             let isSelected = (appGroup.selectedModel == tier)
                             Button(action: {
                                 guard isUnlocked else { return }
                                 triggerLightHaptic()
-                                appGroup.selectedModel = tier
+                                if isDownloaded {
+                                    appGroup.selectedModel = tier
+                                } else {
+                                    onOpenParentApp()
+                                }
                             }) {
                                 VStack(spacing: 2) {
                                     Text(isUnlocked ? tier.shortBadgeName : "🔒 \(tier.shortBadgeName)")
                                         .font(.system(size: 11, weight: .semibold))
-                                    Text(isUnlocked ? tier.latencyDescription : tier.requiredRAMBadgeText)
+                                    Text(!isUnlocked ? tier.requiredRAMBadgeText : (isDownloaded ? tier.latencyDescription : "⬇ Télécharger"))
                                         .font(.system(size: 9, weight: .regular))
                                         .opacity(0.75)
                                 }
@@ -968,7 +1037,7 @@ public struct KeyboardLayoutView: View {
                                 .padding(.vertical, 5)
                                 .background(
                                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .fill(isSelected ? Color(hex: "#0A84FF") : Color(hex: "#2C2C2E").opacity(isUnlocked ? 1.0 : 0.45))
+                                        .fill(isSelected ? Color(hex: "#0A84FF") : Color(hex: "#2C2C2E").opacity(isUnlocked && isDownloaded ? 1.0 : 0.55))
                                 )
                                 .foregroundColor(isUnlocked ? .white : Color.white.opacity(0.45))
                             }
@@ -1110,6 +1179,9 @@ public struct KeyboardLayoutView: View {
                 )
                 .gesture(
                     DragGesture(minimumDistance: 0)
+                        .updating($isBackspaceTouchActive) { _, state, _ in
+                            state = true
+                        }
                         .onChanged { _ in
                             if !isHoldingBackspace {
                                 startBackspaceRepeat()
@@ -1159,6 +1231,9 @@ public struct KeyboardLayoutView: View {
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 0)
+                    .updating($isCharacterKeyTouchActive) { _, state, _ in
+                        state = true
+                    }
                     .onChanged { value in
                         if pressedKeyID != key {
                             beginKeyPress(key)
@@ -1269,6 +1344,15 @@ public struct KeyboardLayoutView: View {
         longPressTimer = timer
     }
 
+    private func cancelKeyPress() {
+        longPressTimer?.invalidate()
+        longPressTimer = nil
+        pressedKeyID = nil
+        isShowingLongPressVariants = false
+        activeVariants = []
+        selectedVariantIndex = 0
+    }
+
     private func endKeyPress(_ key: String) {
         longPressTimer?.invalidate()
         longPressTimer = nil
@@ -1289,7 +1373,8 @@ public struct KeyboardLayoutView: View {
         appGroup.clearLastInsertedSentenceLength()
         onInsertText(textToInsert)
         localTypedContextBuffer += textToInsert
-        refreshAutocorrectSuggestions()
+        lastLocalEditTime = Date()
+        refreshAutocorrectSuggestions(preferLocalBuffer: true)
 
         if currentLayer == .letters && shiftState == .uppercased {
             shiftState = .lowercased
@@ -1378,10 +1463,11 @@ public struct KeyboardLayoutView: View {
                 appGroup.clearLastInsertedSentenceLength()
                 onInsertText("\n")
                 localTypedContextBuffer += "\n"
+                lastLocalEditTime = Date()
                 if shiftState == .lowercased {
                     shiftState = .uppercased
                 }
-                refreshAutocorrectSuggestions()
+                refreshAutocorrectSuggestions(preferLocalBuffer: true)
             }) {
                 Text(isAZERTYLayout ? "retour" : "return")
                     .font(.system(size: isIPad ? 16 : 15, weight: .regular))
@@ -1444,7 +1530,7 @@ public struct KeyboardLayoutView: View {
         triggerLightHaptic()
         appGroup.clearLastInsertedSentenceLength()
         let now = Date()
-        let currentContext = contextBeforeCursorProvider()
+        let currentContext = localTypedContextBuffer.isEmpty ? contextBeforeCursorProvider() : localTypedContextBuffer
         let lastChar = currentContext.last
         let secondLastChar = currentContext.dropLast().last
         let canInsertDoubleSpacePeriod = (lastChar == " " && secondLastChar != nil && secondLastChar != "." && secondLastChar != " " && secondLastChar != "\n")
@@ -1456,21 +1542,23 @@ public struct KeyboardLayoutView: View {
             }
             onInsertText(". ")
             localTypedContextBuffer += ". "
+            lastLocalEditTime = now
             if shiftState == .lowercased {
                 shiftState = .uppercased
             }
             lastSpaceTapTime = .distantPast
-            refreshAutocorrectSuggestions()
+            refreshAutocorrectSuggestions(preferLocalBuffer: true)
         } else {
             // Application automatique sur Espace UNIQUEMENT pour les corrections évidentes d'apostrophe/accent
-            // ou les abréviations personnelles de l'utilisateur (ex: "jarrive" -> "j'arrive ", "cest" -> "c'est ")
+            // (ex: "jarrive" -> "j'arrive ", "cest" -> "c'est ", "l'ecole" -> "l'école ")
             let s = currentSuggestionSet
             if appGroup.isSmartAutocorrectEnabled && s.shouldAutoReplaceOnSpace && !s.typedWord.isEmpty {
                 applySuggestionCandidate(s.primaryCorrection, replaceCount: s.typedWord.count)
             } else {
                 onInsertText(" ")
                 localTypedContextBuffer += " "
-                refreshAutocorrectSuggestions()
+                lastLocalEditTime = now
+                refreshAutocorrectSuggestions(preferLocalBuffer: true)
             }
             lastSpaceTapTime = now
         }
@@ -1483,16 +1571,24 @@ public struct KeyboardLayoutView: View {
         onDeleteBackward()
         if !localTypedContextBuffer.isEmpty {
             localTypedContextBuffer.removeLast()
+        } else {
+            localTypedContextBuffer = String(contextBeforeCursorProvider().dropLast())
         }
-        refreshAutocorrectSuggestions()
+        lastLocalEditTime = Date()
+        refreshAutocorrectSuggestions(preferLocalBuffer: true)
 
         backspaceRepeatTimer?.invalidate()
         let timer = Timer(timeInterval: 0.075, repeats: true) { _ in
+            guard isHoldingBackspace else {
+                stopBackspaceRepeat()
+                return
+            }
             onDeleteBackward()
             if !localTypedContextBuffer.isEmpty {
                 localTypedContextBuffer.removeLast()
             }
-            refreshAutocorrectSuggestions()
+            lastLocalEditTime = Date()
+            refreshAutocorrectSuggestions(preferLocalBuffer: true)
         }
         RunLoop.main.add(timer, forMode: .common)
         backspaceRepeatTimer = timer

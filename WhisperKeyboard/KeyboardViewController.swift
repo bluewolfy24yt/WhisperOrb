@@ -63,6 +63,9 @@ public final class KeyboardViewController: UIInputViewController {
             onAdvanceToNextKeyboard: { [weak self] in
                 self?.advanceToNextKeyboard()
             },
+            onOpenParentApp: { [weak self] in
+                self?.openParentApp()
+            },
             contextBeforeCursorProvider: { [weak self] in
                 self?.textDocumentProxy.documentContextBeforeInput ?? ""
             }
@@ -133,9 +136,10 @@ public final class KeyboardViewController: UIInputViewController {
             deleteLastDictatedSentence(length: deleteCount)
         }
 
-        // 2. Insertion du texte fraîchement transcrit par Whisper dans Goodnotes
+        // 2. Insertion du texte fraîchement transcrit par Whisper
         if let textToInsert = AppGroupManager.shared.consumePendingTranscribedText(), !textToInsert.isEmpty {
-            insertText(textToInsert)
+            textDocumentProxy.insertText(textToInsert)
+            NotificationCenter.default.post(name: Self.textDidChangeNotification, object: nil)
         }
     }
 
@@ -143,12 +147,10 @@ public final class KeyboardViewController: UIInputViewController {
 
     public func insertText(_ text: String) {
         textDocumentProxy.insertText(text)
-        NotificationCenter.default.post(name: Self.textDidChangeNotification, object: nil)
     }
 
     public func deleteBackward() {
         textDocumentProxy.deleteBackward()
-        NotificationCenter.default.post(name: Self.textDidChangeNotification, object: nil)
     }
 
     public func deleteLastDictatedSentence(length: Int) {
@@ -162,5 +164,19 @@ public final class KeyboardViewController: UIInputViewController {
 
     public func advanceToNextKeyboard() {
         self.advanceToNextInputMode()
+    }
+
+    public func openParentApp() {
+        guard let url = URL(string: "whisperorb://activate-mic") else { return }
+        extensionContext?.open(url, completionHandler: nil)
+        var responder: UIResponder? = self
+        let selector = sel_registerName("openURL:")
+        while let current = responder {
+            if current.responds(to: selector) {
+                _ = current.perform(selector, with: url)
+                break
+            }
+            responder = current.next
+        }
     }
 }

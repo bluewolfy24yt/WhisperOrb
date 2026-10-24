@@ -42,6 +42,7 @@ public final class WhisperEngine: ObservableObject {
     private var currentSilenceDurationSeconds: Double = 0.0
     private var hasSpokenEnoughInCurrentUtterance: Bool = false
     private var isTranscribingNow: Bool = false
+    private var lastHeartbeatTime: TimeInterval = 0
     private var cancellables = Set<AnyCancellable>()
 
     // MARK: - Initialisation
@@ -79,8 +80,8 @@ public final class WhisperEngine: ObservableObject {
                     if self.loadedTier != newTier && self.loadingTier != newTier {
                         self.loadModel(newTier)
                     }
-                } else if self.loadedTier != nil && self.loadedTier != newTier {
-                    self.unloadCurrentModel()
+                } else {
+                    self.statusBannerMessage = "Téléchargez \(newTier.shortBadgeName) dans la Carte 2 pour l'activer."
                 }
             }
             .store(in: &cancellables)
@@ -114,10 +115,7 @@ public final class WhisperEngine: ObservableObject {
                         whisper_tokenize(validCtx, cStr, buf.baseAddress, Int32(buf.count))
                     }
                 }
-                let extracted = count > 0 ? Array(tempTokens.prefix(Int(count))) : []
-                DispatchQueue.main.async {
-                    self.cachedPromptTokens = extracted
-                }
+                self.cachedPromptTokens = count > 0 ? Array(tempTokens.prefix(Int(count))) : []
             }
         }
     }
@@ -134,6 +132,12 @@ public final class WhisperEngine: ObservableObject {
             selector: #selector(handleAudioEngineConfigurationChange(_:)),
             name: .AVAudioEngineConfigurationChange,
             object: audioEngine
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleMediaServicesWereReset(_:)),
+            name: AVAudioSession.mediaServicesWereResetNotification,
+            object: AVAudioSession.sharedInstance()
         )
     }
 
@@ -166,6 +170,13 @@ public final class WhisperEngine: ObservableObject {
         }
     }
 
+    @objc private func handleMediaServicesWereReset(_ notification: Notification) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            guard let self = self, self.isBackgroundEngineRunning else { return }
+            self.startEngineInternal()
+        }
+    }
+
     // MARK: - 1. Gestion Stricte de la RAM & Initialisation GPU Metal + FlashAttention
 
     public func unloadCurrentModel() {
@@ -178,6 +189,7 @@ public final class WhisperEngine: ObservableObject {
                     whisper_free(ctx)
                     self.whisperContext = nil
                 }
+                self.cachedPromptTokens = []
             }
         }
     }
@@ -207,7 +219,7 @@ public final class WhisperEngine: ObservableObject {
         isLoadingModel = true
         loadingTier = tier
         lastErrorMessage = nil
-        statusBannerMessage = "Chargement GPU Metal de \(tier.displayName) (\(tier.ramUsageMB) Mo)..."
+        statusBannerMessage = "Chargement de \(tier.displayName) (\(tier.ramUsageMB) Mo)..."
 
         let modelPath = modelURL.path
         let currentLangSelection = appGroup.selectedLanguage
@@ -230,19 +242,22 @@ public final class WhisperEngine: ObservableObject {
                 self.activeLangCString = strdup(resolvedLang)
 
                 var cparams = whisper_context_default_params()
-                cparams.use_gpu = true
+                // Sur iPhone 4 Go, les modèles >= 800 Mo (Expert+ 874 Mo, TITAN 1080 Mo) dépassent la limite
+                // de buffers Metal câblés par processus (Jetsam SIGKILL). Le mode CPU/Accelerate mmap évite ce crash.
+                let useMetalGPU = !(isConstrainedRAM && tier.sizeMB >= 800)
+                cparams.use_gpu = useMetalGPU
                 // Sur iPhone 4 Go (ou modèles >= 500 Mo sur appareils < 5.5 Go), désactiver flash_attn
                 // évite un pic d'allocation des buffers KV Metal qui provoque un Jetsam kill iOS.
-                cparams.flash_attn = !(isConstrainedRAM && tier.sizeMB >= 500)
+                cparams.flash_attn = useMetalGPU && !(isConstrainedRAM && tier.sizeMB >= 500)
 
                 var ctx = whisper_init_from_file_with_params(modelPath, cparams)
-                var metalActive = true
+                var metalActive = useMetalGPU
 
                 if ctx == nil && cparams.flash_attn {
                     cparams.flash_attn = false
                     ctx = whisper_init_from_file_with_params(modelPath, cparams)
                 }
-                if ctx == nil {
+                if ctx == nil && cparams.use_gpu {
                     cparams.use_gpu = false
                     metalActive = false
                     ctx = whisper_init_from_file_with_params(modelPath, cparams)
@@ -263,7 +278,7 @@ public final class WhisperEngine: ObservableObject {
                     // Éviter le passe de warmup sur les modèles lourds (>= 500 Mo) sur appareils <= 4 Go
                     // pour ne pas doubler le pic mémoire immédiatement après l'initialisation.
                     if !(isConstrainedRAM && tier.sizeMB >= 500) {
-                        var warmupParams = self.makeWhisperFullParams(audioDurationSeconds: 0.5, isAutoDetect: resolvedLang == "auto")
+                        var warmupParams = self.makeWhisperFullParams(audioDurationSeconds: 0.5)
                         warmupParams.initial_prompt = nil
                         warmupParams.max_tokens = 1
                         let warmupSilence = [Float](repeating: 0.0, count: 8000)
@@ -285,7 +300,7 @@ public final class WhisperEngine: ObservableObject {
                     if loadedSuccessfully {
                         let accelLabel = metalActive
                             ? (flashEnabled ? "GPU Metal + FlashAttention" : "GPU Metal (Mémoire Optimisée)")
-                            : "\(self.optimalThreadCount) cœurs Performance"
+                            : "\(self.optimalThreadCount) cœurs Accelerate (Anti-OOM)"
                         self.statusBannerMessage = "\(tier.shortBadgeName) actif • \(accelLabel)"
                     } else {
                         self.lastErrorMessage = "Échec de l'initialisation du modèle \(tier.displayName) (mémoire insuffisante)."
@@ -296,12 +311,16 @@ public final class WhisperEngine: ObservableObject {
         }
     }
 
-    private func makeWhisperFullParams(audioDurationSeconds: Double, isAutoDetect: Bool) -> whisper_full_params {
+    /// Doit être appelé sur `inferenceQueue` pour garantir la validité de `activeLangCString`.
+    private func makeWhisperFullParams(audioDurationSeconds: Double) -> whisper_full_params {
         var wparams = whisper_full_default_params(WHISPER_SAMPLING_GREEDY)
         if let langPtr = activeLangCString {
             wparams.language = UnsafePointer(langPtr)
         }
-        wparams.detect_language = isAutoDetect
+        // IMPORTANT: Dans whisper.cpp, `wparams.language = "auto"` suffit pour auto-détecter la langue ET transcrire.
+        // Mettre `wparams.detect_language = true` arrête `whisper_full_with_state` immédiatement après la détection
+        // sans décoder le moindre segment de texte !
+        wparams.detect_language = false
         wparams.translate = false
         wparams.n_threads = Int32(optimalThreadCount)
         wparams.single_segment = true
@@ -342,6 +361,17 @@ public final class WhisperEngine: ObservableObject {
     }
 
     public func startBackgroundAudioEngine() {
+        if isBackgroundEngineRunning && audioEngine.isRunning {
+            AppGroupManager.shared.recordEngineHeartbeat()
+            AppGroupManager.shared.isBackgroundEngineActive = true
+            let appGroup = AppGroupManager.shared
+            let selectedTier = appGroup.selectedModel
+            if ModelDownloader.shared.isModelDownloaded(selectedTier) && whisperContext == nil && !isLoadingModel {
+                loadModel(selectedTier)
+            }
+            return
+        }
+
         AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in
             DispatchQueue.main.async {
                 guard let self = self else { return }
@@ -405,6 +435,8 @@ public final class WhisperEngine: ObservableObject {
             audioEngine.prepare()
             try audioEngine.start()
 
+            lastHeartbeatTime = Date().timeIntervalSince1970
+            AppGroupManager.shared.recordEngineHeartbeat()
             isBackgroundEngineRunning = true
             AppGroupManager.shared.isBackgroundEngineActive = true
             statusBannerMessage = "Moteur Audio Tâche de Fond ACTIF — Prêt à dicter depuis le clavier"
@@ -413,6 +445,7 @@ public final class WhisperEngine: ObservableObject {
             lastErrorMessage = "Erreur d'activation audio : \(error.localizedDescription)"
             statusBannerMessage = "Échec du démarrage audio"
             isBackgroundEngineRunning = false
+            AppGroupManager.shared.clearEngineHeartbeat()
             AppGroupManager.shared.isBackgroundEngineActive = false
         }
     }
@@ -425,6 +458,7 @@ public final class WhisperEngine: ObservableObject {
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
 
         isBackgroundEngineRunning = false
+        AppGroupManager.shared.clearEngineHeartbeat()
         AppGroupManager.shared.isBackgroundEngineActive = false
         AppGroupManager.shared.orbState = .idle
         AppGroupManager.shared.updateLiveAudioLevel(0.0)
@@ -468,12 +502,18 @@ public final class WhisperEngine: ObservableObject {
             } else {
                 lastErrorMessage = "Veuillez d'abord télécharger l'un des modèles Whisper hors-ligne (Carte 2)."
                 statusBannerMessage = "Aucun modèle hors-ligne téléchargé"
+                appGroup.orbState = .idle
                 return
             }
         }
 
         if !isBackgroundEngineRunning || !audioEngine.isRunning {
             startEngineInternal()
+        }
+
+        guard isBackgroundEngineRunning && audioEngine.isRunning else {
+            appGroup.orbState = .idle
+            return
         }
 
         audioBufferLock.lock()
@@ -483,8 +523,9 @@ public final class WhisperEngine: ObservableObject {
         hasSpokenEnoughInCurrentUtterance = false
         audioBufferLock.unlock()
 
-        AppGroupManager.shared.orbState = .listening
-        statusBannerMessage = "Écoute active (\(AppGroupManager.shared.selectedLanguage.shortPillLabel)) — Parlez maintenant..."
+        appGroup.recordEngineHeartbeat()
+        appGroup.orbState = .listening
+        statusBannerMessage = "Écoute active (\(appGroup.selectedLanguage.shortPillLabel)) — Parlez maintenant..."
     }
 
     public func finishListeningAndTranscribe() {
@@ -514,6 +555,12 @@ public final class WhisperEngine: ObservableObject {
     // MARK: - 4. Conversion Temps Réel vers 16000 Hz Mono Float32, Calcul RMS & VAD
 
     private func processMicrophoneBuffer(_ buffer: AVAudioPCMBuffer) {
+        let now = Date().timeIntervalSince1970
+        if now - lastHeartbeatTime >= 1.5 {
+            lastHeartbeatTime = now
+            AppGroupManager.shared.recordEngineHeartbeat()
+        }
+
         let currentState = AppGroupManager.shared.orbState
         guard currentState == .listening, !isTranscribingNow else {
             if smoothedLevel > 0.01 {
@@ -773,15 +820,11 @@ public final class WhisperEngine: ObservableObject {
 
         let audioDurationSeconds = Double(conditionedFrames.count) / targetSampleRate
         let isAutoDetect = (AppGroupManager.shared.selectedLanguage == .auto)
-        let baseParams = makeWhisperFullParams(audioDurationSeconds: audioDurationSeconds, isAutoDetect: isAutoDetect)
-
-        // Pas de prompt initial sur Nano/Flash pour éviter qu'un petit modèle ne répète le seed
         let isSmallModel = (loadedTier == .nano || loadedTier == .eclair)
-        let promptTokensSnapshot = (isSmallModel || isAutoDetect) ? [] : cachedPromptTokens
 
         isTranscribingNow = true
         AppGroupManager.shared.orbState = .transcribing
-        statusBannerMessage = "Transcription GPU Metal..."
+        statusBannerMessage = "Transcription en cours..."
         let startTime = Date()
 
         inferenceQueue.async { [weak self] in
@@ -794,6 +837,9 @@ public final class WhisperEngine: ObservableObject {
                 }
                 return
             }
+
+            let baseParams = self.makeWhisperFullParams(audioDurationSeconds: audioDurationSeconds)
+            let promptTokensSnapshot = (isSmallModel || isAutoDetect) ? [] : self.cachedPromptTokens
 
             let rc: Int32 = conditionedFrames.withUnsafeBufferPointer { audioPtr in
                 var wparams = baseParams

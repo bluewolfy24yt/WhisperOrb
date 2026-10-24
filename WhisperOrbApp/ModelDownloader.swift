@@ -66,11 +66,18 @@ public final class ModelDownloader: NSObject, ObservableObject, URLSessionDownlo
                 excludeFromBackup(url: localModelURL(for: tier))
             }
         }
+        let sortedRaws = found.map(\.rawValue).sorted()
         if Thread.isMainThread {
             self.downloadedModels = found
+            if AppGroupManager.shared.downloadedModelRaws != sortedRaws {
+                AppGroupManager.shared.downloadedModelRaws = sortedRaws
+            }
         } else {
             DispatchQueue.main.async {
                 self.downloadedModels = found
+                if AppGroupManager.shared.downloadedModelRaws != sortedRaws {
+                    AppGroupManager.shared.downloadedModelRaws = sortedRaws
+                }
             }
         }
     }

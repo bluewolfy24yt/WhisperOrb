@@ -42,6 +42,13 @@ struct WhisperOrbApp: App {
                         }
                     }
                 }
+                .onOpenURL { _ in
+                    appGroup.reloadStateFromChannels()
+                    modelDownloader.refreshDownloadedModels()
+                    if !whisperEngine.isBackgroundEngineRunning {
+                        whisperEngine.startBackgroundAudioEngine()
+                    }
+                }
         }
         .onChange(of: scenePhase) { newPhase in
             switch newPhase {

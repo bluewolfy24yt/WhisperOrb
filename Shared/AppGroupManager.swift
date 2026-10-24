@@ -709,6 +709,7 @@ public struct WhisperSharedStatePayload: Codable, Equatable {
     public var orbStateRaw: String
     public var currentAudioLevel: Float
     public var pendingTranscribedText: String
+    public var pendingTextUpdatedAt: TimeInterval?
     public var lastInsertedSentenceLength: Int
     public var shouldDeleteLastSentence: Bool
     public var autoSpaceForGoodnotes: Bool
@@ -717,6 +718,7 @@ public struct WhisperSharedStatePayload: Codable, Equatable {
     public var isBackgroundEngineActive: Bool
     public var isKeyboardCollapsed: Bool?
     public var isSmartAutocorrectEnabled: Bool?
+    public var downloadedModelRaws: [String]?
     public var toggleRecordingRequestCount: Int?
     public var updatedAt: TimeInterval
 }
@@ -728,12 +730,22 @@ public final class AppGroupManager: ObservableObject {
 
     public static let appGroupIdentifier: String = {
         let fallbackGroup = "group.com.bluewolfy24yt.whisperorb"
+        if let altGroups = Bundle.main.object(forInfoDictionaryKey: "ALTAppGroups") as? [String],
+           let firstGroup = altGroups.first, !firstGroup.isEmpty {
+            if FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: firstGroup) != nil {
+                return firstGroup
+            }
+        }
         if let bundleId = Bundle.main.bundleIdentifier {
             let baseBundleId: String
             if bundleId.hasSuffix(".keyboard") {
                 baseBundleId = String(bundleId.dropLast(".keyboard".count))
             } else if bundleId.hasSuffix(".WhisperKeyboard") {
                 baseBundleId = String(bundleId.dropLast(".WhisperKeyboard".count))
+            } else if bundleId.contains(".keyboard.") {
+                baseBundleId = bundleId.replacingOccurrences(of: ".keyboard.", with: ".")
+            } else if bundleId.contains(".WhisperKeyboard.") {
+                baseBundleId = bundleId.replacingOccurrences(of: ".WhisperKeyboard.", with: ".")
             } else {
                 baseBundleId = bundleId
             }
@@ -833,6 +845,10 @@ public final class AppGroupManager: ObservableObject {
         didSet { if !isApplyingRemoteUpdate && oldValue != isSmartAutocorrectEnabled { persistAndBroadcastState() } }
     }
 
+    @Published public var downloadedModelRaws: [String] = [] {
+        didSet { if !isApplyingRemoteUpdate && oldValue != downloadedModelRaws { persistAndBroadcastState() } }
+    }
+
     public var onToggleRecordingRequested: (() -> Void)?
 
     // MARK: - Propriétés Internes
@@ -841,6 +857,7 @@ public final class AppGroupManager: ObservableObject {
     private var isApplyingRemoteUpdate: Bool = false
     private var pollingTimer: Timer?
     private var lastAppliedTimestamp: TimeInterval = 0
+    private var pendingTextUpdatedAt: TimeInterval? = nil
     private var toggleRecordingRequestCount: Int = 0
     private var lastHandledToggleRequestCount: Int = 0
     private var lastToggleTriggerTime: TimeInterval = 0
@@ -854,6 +871,7 @@ public final class AppGroupManager: ObservableObject {
         static let hasLaunchedBefore = "whisperorb.hasLaunchedBefore"
         static let sharedPayloadData = "whisperorb.sharedPayloadData"
         static let liveAudioLevel = "whisperorb.liveAudioLevel"
+        static let engineHeartbeatTimestamp = "whisperorb.engineHeartbeatTimestamp"
         static let toggleRecordingRequestCount = "whisperorb.toggleRecordingRequestCount"
         static let sharedFileName = "whisperorb_shared_state.json"
         static let recentEmojisList = "whisperorb.recentEmojisList"
@@ -903,6 +921,22 @@ public final class AppGroupManager: ObservableObject {
             current = Array(current.prefix(32))
         }
         recentEmojis = current
+    }
+
+    // MARK: - Heartbeat du Moteur Audio en Arrière-Plan
+
+    public func recordEngineHeartbeat() {
+        userDefaults.set(Date().timeIntervalSince1970, forKey: Keys.engineHeartbeatTimestamp)
+    }
+
+    public func clearEngineHeartbeat() {
+        userDefaults.set(0.0, forKey: Keys.engineHeartbeatTimestamp)
+    }
+
+    public var isEngineHeartbeatFresh: Bool {
+        let lastBeat = userDefaults.double(forKey: Keys.engineHeartbeatTimestamp)
+        guard lastBeat > 0 else { return false }
+        return (Date().timeIntervalSince1970 - lastBeat) < 6.0
     }
 
     // MARK: - Répertoires Partagés
@@ -964,7 +998,7 @@ public final class AppGroupManager: ObservableObject {
         try? encoded.write(to: sharedStateFileURL, options: [.atomic])
     }
 
-    public func persistAndBroadcastState(postDarwinNotification: Bool = true) {
+    public func persistAndBroadcastState(postDarwinNotification: Bool = true, overwritePendingTextState: Bool = false) {
         let now = Date().timeIntervalSince1970
         lastAppliedTimestamp = now
 
@@ -986,6 +1020,43 @@ public final class AppGroupManager: ObservableObject {
         let authoritativeBgEngineActive = isKeyboardExtensionProcess
             ? (existing?.isBackgroundEngineActive ?? isBackgroundEngineActive)
             : isBackgroundEngineActive
+        let authoritativeDownloadedModels = isKeyboardExtensionProcess
+            ? (existing?.downloadedModelRaws ?? downloadedModelRaws)
+            : downloadedModelRaws
+
+        // Empêche l'application principale de ressusciter un pendingTranscribedText déjà consommé par le clavier
+        let authoritativePendingText: String
+        let authoritativePendingTextTime: TimeInterval?
+        let authoritativeLastSentenceLen: Int
+        let authoritativeShouldDelete: Bool
+
+        if overwritePendingTextState {
+            authoritativePendingText = pendingTranscribedText
+            authoritativePendingTextTime = pendingTextUpdatedAt
+            authoritativeLastSentenceLen = lastInsertedSentenceLength
+            authoritativeShouldDelete = shouldDeleteLastSentence
+        } else {
+            authoritativePendingText = existing?.pendingTranscribedText ?? pendingTranscribedText
+            authoritativePendingTextTime = existing?.pendingTextUpdatedAt ?? pendingTextUpdatedAt
+            authoritativeLastSentenceLen = existing?.lastInsertedSentenceLength ?? lastInsertedSentenceLength
+            authoritativeShouldDelete = existing?.shouldDeleteLastSentence ?? shouldDeleteLastSentence
+
+            if Thread.isMainThread {
+                let prevApplying = isApplyingRemoteUpdate
+                isApplyingRemoteUpdate = true
+                if pendingTranscribedText != authoritativePendingText {
+                    pendingTranscribedText = authoritativePendingText
+                }
+                pendingTextUpdatedAt = authoritativePendingTextTime
+                if lastInsertedSentenceLength != authoritativeLastSentenceLen {
+                    lastInsertedSentenceLength = authoritativeLastSentenceLen
+                }
+                if shouldDeleteLastSentence != authoritativeShouldDelete {
+                    shouldDeleteLastSentence = authoritativeShouldDelete
+                }
+                isApplyingRemoteUpdate = prevApplying
+            }
+        }
 
         let payload = WhisperSharedStatePayload(
             bgHex: bgHex,
@@ -996,15 +1067,17 @@ public final class AppGroupManager: ObservableObject {
             forceUnlockAllModels: forceUnlockAllModels,
             orbStateRaw: authoritativeOrbStateRaw,
             currentAudioLevel: authoritativeAudioLevel,
-            pendingTranscribedText: pendingTranscribedText,
-            lastInsertedSentenceLength: lastInsertedSentenceLength,
-            shouldDeleteLastSentence: shouldDeleteLastSentence,
+            pendingTranscribedText: authoritativePendingText,
+            pendingTextUpdatedAt: authoritativePendingTextTime,
+            lastInsertedSentenceLength: authoritativeLastSentenceLen,
+            shouldDeleteLastSentence: authoritativeShouldDelete,
             autoSpaceForGoodnotes: autoSpaceForGoodnotes,
             autoPunctuation: autoPunctuation,
             vadSilenceThresholdSeconds: vadSilenceThresholdSeconds,
             isBackgroundEngineActive: authoritativeBgEngineActive,
             isKeyboardCollapsed: isKeyboardCollapsed,
             isSmartAutocorrectEnabled: isSmartAutocorrectEnabled,
+            downloadedModelRaws: authoritativeDownloadedModels,
             toggleRecordingRequestCount: latestToggleCount,
             updatedAt: now
         )
@@ -1052,6 +1125,8 @@ public final class AppGroupManager: ObservableObject {
     }
 
     public func reloadStateFromChannels() {
+        UserStyleMemoryManager.shared.reloadFromDisk()
+
         guard let validPayload = readFreshestPayload() else {
             return
         }
@@ -1099,17 +1174,31 @@ public final class AppGroupManager: ObservableObject {
             if let forceUnlock = validPayload.forceUnlockAllModels, self.forceUnlockAllModels != forceUnlock {
                 self.forceUnlockAllModels = forceUnlock
             }
+            if let remoteDownloaded = validPayload.downloadedModelRaws, self.downloadedModelRaws != remoteDownloaded {
+                self.downloadedModelRaws = remoteDownloaded
+            }
             if self.isKeyboardExtensionProcess {
-                if let state = WhisperOrbState(rawValue: validPayload.orbStateRaw), self.orbState != state {
-                    self.orbState = state
+                let engineAlive = validPayload.isBackgroundEngineActive && self.isEngineHeartbeatFresh
+                if self.isBackgroundEngineActive != engineAlive {
+                    self.isBackgroundEngineActive = engineAlive
                 }
-                if abs(self.currentAudioLevel - validPayload.currentAudioLevel) > 0.005 {
-                    self.currentAudioLevel = validPayload.currentAudioLevel
-                }
-                if self.isBackgroundEngineActive != validPayload.isBackgroundEngineActive {
-                    self.isBackgroundEngineActive = validPayload.isBackgroundEngineActive
+                if engineAlive {
+                    if let state = WhisperOrbState(rawValue: validPayload.orbStateRaw), self.orbState != state {
+                        self.orbState = state
+                    }
+                    if abs(self.currentAudioLevel - validPayload.currentAudioLevel) > 0.005 {
+                        self.currentAudioLevel = validPayload.currentAudioLevel
+                    }
+                } else {
+                    if self.orbState != .idle {
+                        self.orbState = .idle
+                    }
+                    if self.currentAudioLevel != 0.0 {
+                        self.currentAudioLevel = 0.0
+                    }
                 }
             }
+            self.pendingTextUpdatedAt = validPayload.pendingTextUpdatedAt
             if self.pendingTranscribedText != validPayload.pendingTranscribedText {
                 self.pendingTranscribedText = validPayload.pendingTranscribedText
             }
@@ -1192,10 +1281,11 @@ public final class AppGroupManager: ObservableObject {
             guard let self = self else { return }
             self.lastInsertedSentenceLength = formattedText.count
             self.pendingTranscribedText = formattedText
+            self.pendingTextUpdatedAt = Date().timeIntervalSince1970
             self.orbState = .idle
             self.currentAudioLevel = 0.0
             self.userDefaults.set(Float(0.0), forKey: Keys.liveAudioLevel)
-            self.persistAndBroadcastState(postDarwinNotification: true)
+            self.persistAndBroadcastState(postDarwinNotification: true, overwritePendingTextState: true)
         }
 
         if Thread.isMainThread {
@@ -1207,17 +1297,24 @@ public final class AppGroupManager: ObservableObject {
 
     public func consumePendingTranscribedText() -> String? {
         guard !pendingTranscribedText.isEmpty else { return nil }
-        let textToInsert = pendingTranscribedText
+        let now = Date().timeIntervalSince1970
+        let textTimestamp = pendingTextUpdatedAt ?? readFreshestPayload()?.pendingTextUpdatedAt
+        let isFresh = textTimestamp == nil || (now - (textTimestamp ?? now)) <= 15.0
+
+        let textToInsert = isFresh ? pendingTranscribedText : nil
         isApplyingRemoteUpdate = true
         pendingTranscribedText = ""
+        pendingTextUpdatedAt = nil
         isApplyingRemoteUpdate = false
 
         if var payload = readFreshestPayload() {
             payload.pendingTranscribedText = ""
-            payload.updatedAt = Date().timeIntervalSince1970
+            payload.pendingTextUpdatedAt = nil
+            payload.updatedAt = now
             writePayload(payload)
+            postDarwinNotificationNamed(Self.darwinStateUpdatedNotification)
         } else {
-            persistAndBroadcastState(postDarwinNotification: false)
+            persistAndBroadcastState(postDarwinNotification: true, overwritePendingTextState: true)
         }
         return textToInsert
     }
@@ -1228,7 +1325,7 @@ public final class AppGroupManager: ObservableObject {
             guard self.lastInsertedSentenceLength > 0 else { return }
             self.shouldDeleteLastSentence = true
             self.orbState = .idle
-            self.persistAndBroadcastState(postDarwinNotification: true)
+            self.persistAndBroadcastState(postDarwinNotification: true, overwritePendingTextState: true)
         }
 
         if Thread.isMainThread {
@@ -1251,8 +1348,9 @@ public final class AppGroupManager: ObservableObject {
             payload.lastInsertedSentenceLength = 0
             payload.updatedAt = Date().timeIntervalSince1970
             writePayload(payload)
+            postDarwinNotificationNamed(Self.darwinStateUpdatedNotification)
         } else {
-            persistAndBroadcastState(postDarwinNotification: false)
+            persistAndBroadcastState(postDarwinNotification: true, overwritePendingTextState: true)
         }
         return length
     }
@@ -1269,6 +1367,7 @@ public final class AppGroupManager: ObservableObject {
             payload.shouldDeleteLastSentence = false
             payload.updatedAt = Date().timeIntervalSince1970
             writePayload(payload)
+            postDarwinNotificationNamed(Self.darwinStateUpdatedNotification)
         }
     }
 
@@ -1290,11 +1389,15 @@ public final class AppGroupManager: ObservableObject {
                         manager.userDefaults.integer(forKey: Keys.toggleRecordingRequestCount),
                         manager.readFreshestPayload()?.toggleRecordingRequestCount ?? 0
                     )
+                    let isNewRequest = remoteCount > manager.lastHandledToggleRequestCount || remoteCount == 0
                     if remoteCount > manager.toggleRecordingRequestCount {
                         manager.toggleRecordingRequestCount = remoteCount
                     }
                     manager.lastHandledToggleRequestCount = manager.toggleRecordingRequestCount
-                    manager.dispatchDebouncedToggleRecording()
+                    manager.reloadStateFromChannels()
+                    if isNewRequest {
+                        manager.dispatchDebouncedToggleRecording()
+                    }
                 }
             },
             Self.darwinToggleRecordingNotification as CFString,

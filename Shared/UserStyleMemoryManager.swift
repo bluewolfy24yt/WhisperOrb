@@ -5,6 +5,7 @@ import Combine
 
 public struct UserStyleMemoryPayload: Codable, Equatable {
     public var version: Int
+    public var isEnabled: Bool?
     public var autoCapitalizeStart: Bool
     public var stripTrailingPeriodOnShortMessages: Bool
     public var shortMessageMaxWords: Int
@@ -14,6 +15,7 @@ public struct UserStyleMemoryPayload: Codable, Equatable {
 
     public init(
         version: Int = 3,
+        isEnabled: Bool? = true,
         autoCapitalizeStart: Bool = true,
         stripTrailingPeriodOnShortMessages: Bool = false,
         shortMessageMaxWords: Int = 12,
@@ -22,6 +24,7 @@ public struct UserStyleMemoryPayload: Codable, Equatable {
         updatedAt: TimeInterval = Date().timeIntervalSince1970
     ) {
         self.version = version
+        self.isEnabled = isEnabled
         self.autoCapitalizeStart = autoCapitalizeStart
         self.stripTrailingPeriodOnShortMessages = stripTrailingPeriodOnShortMessages
         self.shortMessageMaxWords = shortMessageMaxWords
@@ -88,6 +91,7 @@ public final class UserStyleMemoryManager: ObservableObject {
     public static let shared = UserStyleMemoryManager()
 
     public static let fileName = "user_style_memory.json"
+    private static let enabledKey = "whisperorb.styleMemoryEnabled"
 
     @Published public var memory: UserStyleMemoryPayload {
         didSet {
@@ -99,24 +103,44 @@ public final class UserStyleMemoryManager: ObservableObject {
 
     @Published public var isMemoryEnabled: Bool = true {
         didSet {
-            UserDefaults.standard.set(isMemoryEnabled, forKey: "whisperorb.styleMemoryEnabled")
+            guard !isReloadingFromDisk, oldValue != isMemoryEnabled else { return }
+            sharedDefaults.set(isMemoryEnabled, forKey: Self.enabledKey)
+            UserDefaults.standard.set(isMemoryEnabled, forKey: Self.enabledKey)
+            if memory.isEnabled != isMemoryEnabled {
+                memory.isEnabled = isMemoryEnabled
+            }
         }
     }
 
+    private let sharedDefaults: UserDefaults
     private var isReloadingFromDisk = false
 
+    private static var resolvedContainerURL: URL {
+        if let groupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: AppGroupManager.appGroupIdentifier) {
+            return groupURL
+        }
+        return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+    }
+
     public var memoryFileURL: URL {
-        AppGroupManager.shared.sharedContainerURL.appendingPathComponent(Self.fileName, isDirectory: false)
+        Self.resolvedContainerURL.appendingPathComponent(Self.fileName, isDirectory: false)
     }
 
     private init() {
-        if UserDefaults.standard.object(forKey: "whisperorb.styleMemoryEnabled") != nil {
-            self.isMemoryEnabled = UserDefaults.standard.bool(forKey: "whisperorb.styleMemoryEnabled")
-        } else {
-            self.isMemoryEnabled = true
-        }
+        let defaults = UserDefaults(suiteName: AppGroupManager.appGroupIdentifier) ?? UserDefaults.standard
+        self.sharedDefaults = defaults
 
-        let fileURL = AppGroupManager.shared.sharedContainerURL.appendingPathComponent(Self.fileName, isDirectory: false)
+        let initialEnabled: Bool
+        if defaults.object(forKey: Self.enabledKey) != nil {
+            initialEnabled = defaults.bool(forKey: Self.enabledKey)
+        } else if UserDefaults.standard.object(forKey: Self.enabledKey) != nil {
+            initialEnabled = UserDefaults.standard.bool(forKey: Self.enabledKey)
+        } else {
+            initialEnabled = true
+        }
+        self.isMemoryEnabled = initialEnabled
+
+        let fileURL = Self.resolvedContainerURL.appendingPathComponent(Self.fileName, isDirectory: false)
         if let data = try? Data(contentsOf: fileURL),
            var decoded = try? JSONDecoder().decode(UserStyleMemoryPayload.self, from: data) {
             var needsMigrationSave = false
@@ -125,12 +149,19 @@ public final class UserStyleMemoryManager: ObservableObject {
                 decoded.stripTrailingPeriodOnShortMessages = false
                 needsMigrationSave = true
             }
+            if let payloadEnabled = decoded.isEnabled {
+                self.isMemoryEnabled = payloadEnabled
+                defaults.set(payloadEnabled, forKey: Self.enabledKey)
+            } else {
+                decoded.isEnabled = initialEnabled
+                needsMigrationSave = true
+            }
             self.memory = decoded
             if needsMigrationSave {
                 savePayloadToDisk(decoded, url: fileURL)
             }
         } else {
-            let initial = UserStyleMemoryPayload()
+            let initial = UserStyleMemoryPayload(isEnabled: initialEnabled)
             self.memory = initial
             savePayloadToDisk(initial, url: fileURL)
         }
@@ -141,15 +172,24 @@ public final class UserStyleMemoryManager: ObservableObject {
               let decoded = try? JSONDecoder().decode(UserStyleMemoryPayload.self, from: data) else {
             return
         }
+        isReloadingFromDisk = true
+        defer { isReloadingFromDisk = false }
+        if let payloadEnabled = decoded.isEnabled, payloadEnabled != isMemoryEnabled {
+            isMemoryEnabled = payloadEnabled
+        } else if sharedDefaults.object(forKey: Self.enabledKey) != nil {
+            let defEnabled = sharedDefaults.bool(forKey: Self.enabledKey)
+            if defEnabled != isMemoryEnabled {
+                isMemoryEnabled = defEnabled
+            }
+        }
         if decoded != memory {
-            isReloadingFromDisk = true
             memory = decoded
-            isReloadingFromDisk = false
         }
     }
 
     public func saveToDisk() {
         var updated = memory
+        updated.isEnabled = isMemoryEnabled
         updated.updatedAt = Date().timeIntervalSince1970
         savePayloadToDisk(updated, url: memoryFileURL)
     }

@@ -185,7 +185,7 @@ public struct ContentView: View {
                         .font(.system(size: 24, weight: .bold))
                         .foregroundColor(.white)
 
-                    Text("v2.0 • ON-DEVICE AI")
+                    Text("v2.2.1 • ON-DEVICE AI")
                         .font(.system(size: 10, weight: .bold, design: .monospaced))
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
@@ -663,10 +663,24 @@ public struct ContentView: View {
                     Spacer()
 
                     Button(action: {
-                        if appGroup.selectedModel == tier {
+                        let wasSelected = (appGroup.selectedModel == tier)
+                        if wasSelected {
                             whisperEngine.unloadCurrentModel()
                         }
                         modelDownloader.deleteModel(tier)
+                        if wasSelected,
+                           let fallback = WhisperModelTier.allCases.first(where: {
+                               $0 != tier &&
+                               modelDownloader.isModelDownloaded($0) &&
+                               HardwareDetector.isTierUnlocked(
+                                   $0,
+                                   simulate4GB: appGroup.simulateModest4GBDevice,
+                                   forceUnlock: appGroup.forceUnlockAllModels
+                               )
+                           }) {
+                            appGroup.selectedModel = fallback
+                            whisperEngine.loadModel(fallback)
+                        }
                     }) {
                         Image(systemName: "trash")
                             .font(.system(size: 12, weight: .regular))
@@ -1151,7 +1165,7 @@ public struct ContentView: View {
         VStack(alignment: .leading, spacing: 14) {
             cardSectionHeader(
                 icon: "qrcode",
-                title: "Partage & Installation (v2.0.0)",
+                title: "Partage & Installation (v2.2.1)",
                 subtitle: "Disponible pour Apple (iPhone, iPad, Mac) et Android (.apk)"
             )
 
@@ -1167,7 +1181,7 @@ public struct ContentView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Releases GitHub v2.0.0 (.ipa & .apk)")
+                    Text("Releases GitHub v2.2.1 (.ipa & .apk)")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(.white)
 

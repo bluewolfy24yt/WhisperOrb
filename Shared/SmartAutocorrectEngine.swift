@@ -59,8 +59,6 @@ public final class SmartAutocorrectEngine {
             "quon": "qu'on",
             "quil": "qu'il",
             "quils": "qu'ils",
-            "quelle": "qu'elle",
-            "quelles": "qu'elles",
             "queje": "que je",
             "daccord": "d'accord",
             "dailleurs": "d'ailleurs",
@@ -68,6 +66,10 @@ public final class SmartAutocorrectEngine {
             "aujourdhui": "aujourd'hui",
             "tinquiete": "t'inquiète",
             "peutetre": "peut-être",
+            "sil": "s'il",
+            "sils": "s'ils",
+            "jusqua": "jusqu'à",
+            "quelquun": "quelqu'un",
             "meme": "même",
             "memes": "mêmes",
             "deja": "déjà",
@@ -95,7 +97,6 @@ public final class SmartAutocorrectEngine {
             "reponds": "réponds",
             "repondu": "répondu",
             "ca": "ça",
-            " francais": "français",
             "francais": "français",
             "francaise": "française",
             "premiere": "première",
@@ -106,14 +107,12 @@ public final class SmartAutocorrectEngine {
             "journee": "journée",
             "soiree": "soirée",
             "idee": "idée",
-            " génial": "génial",
             "genial": "génial",
             "securite": "sécurité",
             "qualite": "qualité",
             "verite": "vérité",
             "realite": "réalité",
             "universite": "université",
-            "cote": "côté",
             "arrete": "arrête",
             "arreter": "arrêter",
             "tete": "tête",
@@ -147,8 +146,6 @@ public final class SmartAutocorrectEngine {
             "wont": "won't",
             "im": "I'm",
             "ive": "I've",
-            "id": "I'd",
-            "ill": "I'll",
             "youre": "you're",
             "theyre": "they're",
             "weve": "we've",
@@ -196,7 +193,6 @@ public final class SmartAutocorrectEngine {
             "telefono": "teléfono",
             "numero": "número",
             "rapido": "rápido",
-            "perdón": "perdón",
             "perdon": "perdón",
             "cancion": "canción",
             "informacion": "información"
@@ -206,7 +202,6 @@ public final class SmartAutocorrectEngine {
             "konnen": "können",
             "mussen": "müssen",
             "naturlich": "natürlich",
-            "schon": "schön",
             "zuruck": "zurück",
             "uber": "über",
             "spater": "später",
@@ -227,7 +222,6 @@ public final class SmartAutocorrectEngine {
             "voce": "você",
             "tambem": "também",
             "entao": "então",
-            "ate": "até",
             "ja": "já",
             "obrigatorio": "obrigatório",
             "informacao": "informação"
@@ -242,10 +236,11 @@ public final class SmartAutocorrectEngine {
             "bonjour", "bonsoir", "salut", "merci", "beaucoup", "oui", "non", "d'accord", "super", "parfait",
             "comment", "pourquoi", "quand", "combien", "vraiment", "maintenant", "aujourd'hui", "demain", "hier",
             "toujours", "jamais", "encore", "peut-être", "aussi", "avec", "sans", "pour", "dans", "mais",
-            "c'est", "j'ai", "j'arrive", "t'inquiète", "problème", "téléphone", "clavier", "application", "modèle",
+            "c'est", "c'était", "j'ai", "j'arrive", "j'étais", "t'inquiète", "problème", "téléphone", "clavier", "application", "modèle",
             "message", "question", "réponse", "travail", "maison", "heure", "minute", "semaine", "journée",
             "excellent", "génial", "exactement", "absolument", "évidemment", "directement", "complètement",
-            "possible", "important", "nécessaire", "disponible", "différent", "nouveau", "nouvelle", "premier", "dernière"
+            "possible", "important", "nécessaire", "disponible", "différent", "nouveau", "nouvelle", "premier", "dernière",
+            "quelle", "quelles", "quel", "quels", "côté", "cote"
         ],
         "en": [
             "the", "and", "that", "have", "for", "not", "with", "you", "this", "but",
@@ -260,7 +255,7 @@ public final class SmartAutocorrectEngine {
             "porque", "cuando", "donde", "como", "problema", "teléfono", "mensaje", "pregunta", "respuesta"
         ],
         "de": [
-            "hallo", "danke", "bitte", "guten", "morgen", "abend", "heute", "morgen", "immer", "vielleicht",
+            "hallo", "danke", "bitte", "guten", "morgen", "abend", "heute", "immer", "vielleicht",
             "natürlich", "wirklich", "wichtig", "perfekt", "super", "warum", "wann", "wie", "problem", "nachricht"
         ],
         "it": [
@@ -376,49 +371,104 @@ public final class SmartAutocorrectEngine {
         let isCapitalized = currentPrefix.first?.isUppercase == true
         let isAllCaps = currentPrefix.count > 1 && currentPrefix == currentPrefix.uppercased()
 
-        // 1. Respect absolu de `user_style_memory.json` :
-        // Si l'utilisateur a enregistré cette abréviation (ou tape la forme parlée), on la priorise !
-        let userMemoryPairs = UserStyleMemoryManager.shared.replacements(for: lang)
-        for pair in userMemoryPairs {
-            if pair.written.lowercased() == lowerTyped {
-                // C'est une abréviation voulue par l'utilisateur (ex: "tkt", "bcp") -> On ne la corrige JAMAIS de force !
-                let expanded = applyCasing(pair.spoken, isCapitalized: isCapitalized, isAllCaps: isAllCaps)
-                return AutocorrectSuggestionSet(
+        // 1. Respect de `user_style_memory.json` si activé :
+        // Si l'utilisateur tape une abréviation enregistrée (ex: "tkt", "bcp"), on ne la remplace jamais de force.
+        // Si l'utilisateur tape le mot complet (ex: "beaucoup"), on propose l'abréviation en 2e choix sans forcer.
+        if UserStyleMemoryManager.shared.isMemoryEnabled {
+            let userMemoryPairs = UserStyleMemoryManager.shared.replacements(for: lang)
+            for pair in userMemoryPairs {
+                if pair.written.lowercased() == lowerTyped {
+                    let expanded = applyCasing(pair.spoken, isCapitalized: isCapitalized, isAllCaps: isAllCaps)
+                    return buildDistinctSuggestionSet(
+                        typedWord: currentPrefix,
+                        preferred: [currentPrefix, expanded],
+                        languageCode: lang,
+                        isCapitalized: isCapitalized,
+                        isAllCaps: isAllCaps,
+                        shouldAutoReplaceOnSpace: false
+                    )
+                }
+                if pair.spoken.lowercased() == lowerTyped {
+                    let targetWritten = applyCasing(pair.written, isCapitalized: isCapitalized, isAllCaps: isAllCaps)
+                    return buildDistinctSuggestionSet(
+                        typedWord: currentPrefix,
+                        preferred: [currentPrefix, targetWritten],
+                        languageCode: lang,
+                        isCapitalized: isCapitalized,
+                        isAllCaps: isAllCaps,
+                        shouldAutoReplaceOnSpace: false
+                    )
+                }
+            }
+        }
+
+        // 2. Dictionnaire instantané d'apostrophes & d'accents (ex: "jarrive" -> "j'arrive", "cest" -> "c'est", "c'etait" -> "c'était")
+        let strippedApostropheKey = lowerTyped
+            .replacingOccurrences(of: "'", with: "")
+            .replacingOccurrences(of: "’", with: "")
+
+        if let instantMap = instantCorrectionsByLang[lang] {
+            if let directFix = instantMap[lowerTyped] ?? instantMap[strippedApostropheKey] {
+                let casedFix = applyCasing(directFix, isCapitalized: isCapitalized, isAllCaps: isAllCaps)
+                let shouldReplace = (casedFix.lowercased() != lowerTyped)
+                let altPredictions = findPrefixCompletions(prefix: lowerTyped, languageCode: lang, excluding: [casedFix, currentPrefix])
+                return buildDistinctSuggestionSet(
                     typedWord: currentPrefix,
-                    primaryCorrection: currentPrefix,
-                    secondaryPrediction: expanded,
-                    tertiaryPrediction: predictNextWords(after: currentPrefix, languageCode: lang).first ?? "👍",
+                    preferred: [casedFix, currentPrefix] + altPredictions,
+                    languageCode: lang,
+                    isCapitalized: isCapitalized,
+                    isAllCaps: isAllCaps,
+                    shouldAutoReplaceOnSpace: shouldReplace
+                )
+            }
+
+            // Support des élisions françaises avec apostrophe déjà tapée (ex: "l'ecole" -> "l'école", "d'apres" -> "d'après")
+            if lang == "fr", let (elisionPrefix, stem) = splitFrenchElision(currentPrefix) {
+                let lowerStem = stem.lowercased()
+                if let stemFix = instantMap[lowerStem] {
+                    let combinedFix = elisionPrefix + stemFix
+                    let shouldReplace = (combinedFix.lowercased() != lowerTyped)
+                    let stemCompletions = findPrefixCompletions(prefix: lowerStem, languageCode: lang, excluding: [stemFix, lowerStem])
+                        .map { elisionPrefix + $0 }
+                    return buildDistinctSuggestionSet(
+                        typedWord: currentPrefix,
+                        preferred: [combinedFix, currentPrefix] + stemCompletions,
+                        languageCode: lang,
+                        isCapitalized: isCapitalized,
+                        isAllCaps: isAllCaps,
+                        shouldAutoReplaceOnSpace: shouldReplace
+                    )
+                }
+            }
+        }
+
+        // 3. Complétion d'élision française (ex: "l'app" -> "l'application")
+        if lang == "fr", let (elisionPrefix, stem) = splitFrenchElision(currentPrefix), !stem.isEmpty {
+            let lowerStem = stem.lowercased()
+            let localeTag = localeIdentifier(for: lang)
+            let nsStem = stem as NSString
+            let stemRange = NSRange(location: 0, length: nsStem.length)
+            var stemCompletions = findPrefixCompletions(prefix: lowerStem, languageCode: lang, excluding: [])
+            if let sysComp = textChecker.completions(forPartialWordRange: stemRange, in: stem, language: localeTag) {
+                for item in sysComp where !stemCompletions.contains(where: { $0.caseInsensitiveCompare(item) == .orderedSame }) {
+                    stemCompletions.append(item)
+                    if stemCompletions.count >= 6 { break }
+                }
+            }
+            let prefixedCompletions = stemCompletions.map { elisionPrefix + $0 }
+            if !prefixedCompletions.isEmpty {
+                return buildDistinctSuggestionSet(
+                    typedWord: currentPrefix,
+                    preferred: [prefixedCompletions[0], currentPrefix] + Array(prefixedCompletions.dropFirst()),
+                    languageCode: lang,
+                    isCapitalized: isCapitalized,
+                    isAllCaps: isAllCaps,
                     shouldAutoReplaceOnSpace: false
                 )
             }
-            if pair.spoken.lowercased() == lowerTyped {
-                let targetWritten = applyCasing(pair.written, isCapitalized: isCapitalized, isAllCaps: isAllCaps)
-                return AutocorrectSuggestionSet(
-                    typedWord: currentPrefix,
-                    primaryCorrection: targetWritten,
-                    secondaryPrediction: currentPrefix,
-                    tertiaryPrediction: predictNextWords(after: targetWritten, languageCode: lang).first ?? "👍",
-                    shouldAutoReplaceOnSpace: true
-                )
-            }
         }
 
-        // 2. Dictionnaire instantané d'apostrophes & d'accents (ex: "jarrive" -> "j'arrive", "cest" -> "c'est")
-        if let instantMap = instantCorrectionsByLang[lang],
-           let directFix = instantMap[lowerTyped] {
-            let casedFix = applyCasing(directFix, isCapitalized: isCapitalized, isAllCaps: isAllCaps)
-            let shouldReplace = (casedFix.lowercased() != lowerTyped)
-            let altPredictions = findPrefixCompletions(prefix: lowerTyped, languageCode: lang, excluding: [casedFix, currentPrefix])
-            return AutocorrectSuggestionSet(
-                typedWord: currentPrefix,
-                primaryCorrection: casedFix,
-                secondaryPrediction: altPredictions.first ?? currentPrefix,
-                tertiaryPrediction: altPredictions.dropFirst().first ?? "👍",
-                shouldAutoReplaceOnSpace: shouldReplace
-            )
-        }
-
-        // 3. Complétion de préfixe + Correcteur géométrique & UITextChecker
+        // 4. Complétion de préfixe + Correcteur géométrique & UITextChecker
         let localeTag = localeIdentifier(for: lang)
         let nsWord = currentPrefix as NSString
         let range = NSRange(location: 0, length: nsWord.length)
@@ -441,19 +491,16 @@ public final class SmartAutocorrectEngine {
         }
 
         if isValidSystemWord {
-            let bestCompletion = completions.first(where: { $0.caseInsensitiveCompare(currentPrefix) != .orderedSame })
+            let casedCompletions = completions
+                .filter { $0.caseInsensitiveCompare(currentPrefix) != .orderedSame }
                 .map { applyCasing($0, isCapitalized: isCapitalized, isAllCaps: isAllCaps) }
-                ?? currentPrefix
-            let secondCompletion = completions.dropFirst().first(where: {
-                $0.caseInsensitiveCompare(currentPrefix) != .orderedSame && $0.caseInsensitiveCompare(bestCompletion) != .orderedSame
-            }).map { applyCasing($0, isCapitalized: isCapitalized, isAllCaps: isAllCaps) }
-                ?? predictNextWords(after: currentPrefix, languageCode: lang).first ?? "👍"
 
-            return AutocorrectSuggestionSet(
+            return buildDistinctSuggestionSet(
                 typedWord: currentPrefix,
-                primaryCorrection: currentPrefix,
-                secondaryPrediction: bestCompletion,
-                tertiaryPrediction: secondCompletion,
+                preferred: [currentPrefix] + casedCompletions,
+                languageCode: lang,
+                isCapitalized: isCapitalized,
+                isAllCaps: isAllCaps,
                 shouldAutoReplaceOnSpace: false
             )
         }
@@ -472,40 +519,125 @@ public final class SmartAutocorrectEngine {
                 geometricDistanceScore(typed: lowerTyped, candidate: candidateA.lowercased(), languageCode: lang) <
                 geometricDistanceScore(typed: lowerTyped, candidate: candidateB.lowercased(), languageCode: lang)
             }
+            .map { applyCasing($0, isCapitalized: isCapitalized, isAllCaps: isAllCaps) }
+
+        let casedCompletions = completions.map { applyCasing($0, isCapitalized: isCapitalized, isAllCaps: isAllCaps) }
 
         if let bestGuess = rankedGuesses.first {
-            let casedBest = applyCasing(bestGuess, isCapitalized: isCapitalized, isAllCaps: isAllCaps)
-            let secondChoice = rankedGuesses.dropFirst().first
-                .map { applyCasing($0, isCapitalized: isCapitalized, isAllCaps: isAllCaps) }
-                ?? completions.first
-                ?? currentPrefix
-
             // Ne jamais remplacer de force à l'espace les propositions géométriques/heuristiques :
             // l'utilisateur peut cliquer dessus dans la barre des 3 choix s'il le souhaite.
-            return AutocorrectSuggestionSet(
+            return buildDistinctSuggestionSet(
                 typedWord: currentPrefix,
-                primaryCorrection: casedBest,
-                secondaryPrediction: secondChoice,
-                tertiaryPrediction: completions.dropFirst().first ?? currentPrefix,
+                preferred: [bestGuess] + Array(rankedGuesses.dropFirst()) + casedCompletions + [currentPrefix],
+                languageCode: lang,
+                isCapitalized: isCapitalized,
+                isAllCaps: isAllCaps,
                 shouldAutoReplaceOnSpace: false
             )
         }
 
         // Sinon, si c'est le début d'un mot connu, on propose les complétions sans forcer le remplacement
-        let primaryComp = completions.first
-            .map { applyCasing($0, isCapitalized: isCapitalized, isAllCaps: isAllCaps) }
-            ?? currentPrefix
-        let secondaryComp = completions.dropFirst().first
-            .map { applyCasing($0, isCapitalized: isCapitalized, isAllCaps: isAllCaps) }
-            ?? currentPrefix
-
-        return AutocorrectSuggestionSet(
+        return buildDistinctSuggestionSet(
             typedWord: currentPrefix,
-            primaryCorrection: primaryComp,
-            secondaryPrediction: secondaryComp,
-            tertiaryPrediction: currentPrefix,
+            preferred: casedCompletions + [currentPrefix],
+            languageCode: lang,
+            isCapitalized: isCapitalized,
+            isAllCaps: isAllCaps,
             shouldAutoReplaceOnSpace: false
         )
+    }
+
+    // MARK: - Construction Garantie Sans Doublons ni Emoji Destructif
+
+    private func buildDistinctSuggestionSet(
+        typedWord: String,
+        preferred: [String],
+        languageCode: String,
+        isCapitalized: Bool,
+        isAllCaps: Bool,
+        shouldAutoReplaceOnSpace: Bool
+    ) -> AutocorrectSuggestionSet {
+        var uniqueCandidates: [String] = []
+        func appendIfUnique(_ candidate: String) {
+            let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            if !uniqueCandidates.contains(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) {
+                uniqueCandidates.append(trimmed)
+            }
+        }
+
+        for item in preferred {
+            appendIfUnique(item)
+            if uniqueCandidates.count >= 3 { break }
+        }
+
+        let lowerTyped = typedWord.lowercased()
+
+        if uniqueCandidates.count < 3 {
+            let extraCompletions = findPrefixCompletions(prefix: lowerTyped, languageCode: languageCode, excluding: uniqueCandidates)
+            for comp in extraCompletions {
+                appendIfUnique(applyCasing(comp, isCapitalized: isCapitalized, isAllCaps: isAllCaps))
+                if uniqueCandidates.count >= 3 { break }
+            }
+        }
+
+        if uniqueCandidates.count < 3 {
+            let localeTag = localeIdentifier(for: languageCode)
+            let nsWord = typedWord as NSString
+            let range = NSRange(location: 0, length: nsWord.length)
+            if let sysCompletions = textChecker.completions(forPartialWordRange: range, in: typedWord, language: localeTag) {
+                for comp in sysCompletions {
+                    appendIfUnique(applyCasing(comp, isCapitalized: isCapitalized, isAllCaps: isAllCaps))
+                    if uniqueCandidates.count >= 3 { break }
+                }
+            }
+            if uniqueCandidates.count < 3,
+               let sysGuesses = textChecker.guesses(forWordRange: range, in: typedWord, language: localeTag) {
+                for guess in sysGuesses {
+                    appendIfUnique(applyCasing(guess, isCapitalized: isCapitalized, isAllCaps: isAllCaps))
+                    if uniqueCandidates.count >= 3 { break }
+                }
+            }
+        }
+
+        // Recherche de mots proches commençant par la même lettre dans le lexique fréquent
+        if uniqueCandidates.count < 3, let firstChar = lowerTyped.first {
+            let firstLetter = String(firstChar)
+            let lexicon = frequentLexiconByLang[languageCode] ?? frequentLexiconByLang["en"]!
+            for word in lexicon where word.lowercased().hasPrefix(firstLetter) {
+                appendIfUnique(applyCasing(word, isCapitalized: isCapitalized, isAllCaps: isAllCaps))
+                if uniqueCandidates.count >= 3 { break }
+            }
+            for word in lexicon {
+                appendIfUnique(applyCasing(word, isCapitalized: isCapitalized, isAllCaps: isAllCaps))
+                if uniqueCandidates.count >= 3 { break }
+            }
+        }
+
+        appendIfUnique(typedWord)
+        while uniqueCandidates.count < 3 {
+            uniqueCandidates.append(typedWord)
+        }
+
+        return AutocorrectSuggestionSet(
+            typedWord: typedWord,
+            primaryCorrection: uniqueCandidates[0],
+            secondaryPrediction: uniqueCandidates[1],
+            tertiaryPrediction: uniqueCandidates[2],
+            shouldAutoReplaceOnSpace: shouldAutoReplaceOnSpace
+        )
+    }
+
+    private func splitFrenchElision(_ word: String) -> (prefix: String, stem: String)? {
+        let normalized = word.replacingOccurrences(of: "’", with: "'")
+        guard let apoIndex = normalized.firstIndex(of: "'") else { return nil }
+        let prefixPart = String(normalized[...apoIndex])
+        let stemPart = String(normalized[normalized.index(after: apoIndex)...])
+        guard !stemPart.isEmpty else { return nil }
+        let lowerPrefix = prefixPart.lowercased()
+        let validElisions: Set<String> = ["l'", "d'", "j'", "n'", "s'", "t'", "m'", "c'", "qu'"]
+        guard validElisions.contains(lowerPrefix) else { return nil }
+        return (prefixPart, stemPart)
     }
 
     // MARK: - Helpers de Recherche & Distance Géométrique
@@ -623,8 +755,9 @@ public final class SmartAutocorrectEngine {
     }
 
     private func normalizeLang(_ code: String) -> String {
-        let lower = code.lowercased()
-        if ["fr", "en", "es", "de", "it", "pt"].contains(lower) {
+        let lower = String(code.lowercased().prefix(2))
+        let supported: Set<String> = ["fr", "en", "es", "de", "it", "pt", "nl", "pl", "ja", "ko", "zh", "ar", "ru"]
+        if supported.contains(lower) {
             return lower
         }
         return WhisperLanguageSelection.detectedSystemISOCode
@@ -638,6 +771,13 @@ public final class SmartAutocorrectEngine {
         case "de": return "de_DE"
         case "it": return "it_IT"
         case "pt": return "pt_PT"
+        case "nl": return "nl_NL"
+        case "pl": return "pl_PL"
+        case "ja": return "ja_JP"
+        case "ko": return "ko_KR"
+        case "zh": return "zh_CN"
+        case "ar": return "ar_SA"
+        case "ru": return "ru_RU"
         default:   return "en_US"
         }
     }
