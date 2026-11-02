@@ -1,4 +1,4 @@
-name: Build & Release WhisperOrb v2.2.0 (.ipa & .apk)
+name: Build & Release WhisperOrb v2.2.1 (.ipa & .apk)
 
 on:
   push:
@@ -17,7 +17,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: 2. Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '17'
@@ -51,15 +51,15 @@ jobs:
           path: WhisperOrb-Android.apk
           if-no-files-found: error
 
-      - name: 7. Publish Android APK to GitHub Release v2.2.0
+      - name: 7. Publish Android APK to GitHub Release v2.2.1
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.2.0
-          name: "WhisperOrb v2.2.0 — Clavier Gboard/HeliBoard Natif avec Bandeau Incrusté (.apk & .ipa)"
+          tag_name: v2.2.1
+          name: "WhisperOrb v2.2.1 — Clavier Gboard/HeliBoard Natif avec Bandeau Incrusté (.apk & .ipa)"
           body: |
-            ## 🫧 WhisperOrb `v2.2.0` — Clavier Gboard/HeliBoard Complet Intégré + Bandeau Incrusté dans le Code Source du Clavier
+            ## 🫧 WhisperOrb `v2.2.1` — Clavier Gboard/HeliBoard Complet Intégré + Bandeau Incrusté dans le Code Source du Clavier
 
-            ### 🇫🇷 Nouveautés Majeures (`v2.2.0`)
+            ### 🇫🇷 Nouveautés Majeures (`v2.2.1`)
             - ⌨️ **Moteur Clavier Gboard / HeliBoard v3.2 Complet Intégré dans `WhisperOrb-Android.apk`** :
               1. **Bandeau WhisperOrb physiquement soudé DANS le code source du clavier (`main_keyboard_frame.xml` / `LatinIME`)** : zéro fenêtre flottante, zéro calcul de coordonnées écran, alignement parfait au pixel près au sommet du clavier.
               2. **Écriture Glissée (Swipe / Glide Typing) native pré-intégrée** (`libjni_latinimegoogle.so` arm64-v8a embarquée d'office).
@@ -132,11 +132,11 @@ jobs:
           path: WhisperOrb-iPad.ipa
           if-no-files-found: error
 
-      - name: 8. Publish Apple IPA to GitHub Release v2.2.0
+      - name: 8. Publish Apple IPA to GitHub Release v2.2.1
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.2.0
-          name: "WhisperOrb v2.2.0 — Clavier Gboard/HeliBoard Natif avec Bandeau Incrusté (.apk & .ipa)"
+          tag_name: v2.2.1
+          name: "WhisperOrb v2.2.1 — Clavier Gboard/HeliBoard Natif avec Bandeau Incrusté (.apk & .ipa)"
           files: WhisperOrb-iPad.ipa
           draft: false
           prerelease: false

@@ -8,12 +8,13 @@ plugins {
 android {
     namespace = "helium314.keyboard.latin"
     compileSdk = 35
+    ndkVersion = "26.3.11579264"
 
     defaultConfig {
         minSdk = 26
         buildConfigField("String", "APPLICATION_ID", "\"com.whisperorb.app\"")
-        buildConfigField("int", "VERSION_CODE", "220")
-        buildConfigField("String", "VERSION_NAME", "\"2.2.0\"")
+        buildConfigField("int", "VERSION_CODE", "221")
+        buildConfigField("String", "VERSION_NAME", "\"2.2.1\"")
 
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")

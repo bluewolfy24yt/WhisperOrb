@@ -2,15 +2,16 @@
 
 <img src="docs/assets/icon-blackhole.png" alt="WhisperOrb Black Hole Icon" width="136" height="136" style="border-radius: 28px;" />
 
-# WhisperOrb `v2.0.0`
+# WhisperOrb `v2.2.1`
 
 **100% On-Device Offline AI Voice Dictation & Native Keyboard Ecosystem for Apple (iOS / iPadOS / macOS) & Android (Phones, Tablets, Chromebook Plus & Googlebook 14)**
 
-[![Release v2.0.0](https://img.shields.io/badge/Release-v2.0.0-0A84FF?style=for-the-badge&logo=github)](https://github.com/bluewolfy24yt/WhisperOrb/releases/latest)
+[![Release v2.2.1](https://img.shields.io/badge/Release-v2.2.1-0A84FF?style=for-the-badge&logo=github)](https://github.com/bluewolfy24yt/WhisperOrb/releases/latest)
 [![Apple Metal GPU](https://img.shields.io/badge/Apple-iOS%20%7C%20iPadOS%20%7C%20macOS%20(Metal%20GPU)-white?style=for-the-badge&logo=apple)](https://github.com/bluewolfy24yt/WhisperOrb/releases/latest)
 [![Android Multi-ABI](https://img.shields.io/badge/Android-ARM64%20%2B%20x86__64%20AVX2%20(.apk)-3DDC84?style=for-the-badge&logo=android)](https://github.com/bluewolfy24yt/WhisperOrb/releases/latest)
 [![Googlebook 14 & Tablets](https://img.shields.io/badge/Googlebook%2014%20%7C%20Chromebook%20%7C%20Tablets-Ready-38BDF8?style=for-the-badge)](#)
 [![Co-Author](https://img.shields.io/badge/AI%20Co--Author-Gemini--4--Argon-8A2BE2?style=for-the-badge)](#)
+[![Co-Author Claude](https://img.shields.io/badge/AI%20Co--Author-Claude%20Opus%205.5-D97757?style=for-the-badge&logo=anthropic)](https://claude.com/claude-code)
 
 <h3>
   <a href="#-english-documentation">🇬🇧 English Documentation</a>
@@ -35,9 +36,9 @@
 
 ## Overview
 
-**WhisperOrb v2.0.0** is a complete, 100% offline, privacy-first voice dictation and native keyboard ecosystem powered by `whisper.cpp` C++/Metal/ARM64/AVX2 acceleration. Zero audio ever leaves your device: every transcription and autocorrect prediction runs locally on your phone, tablet, or laptop silicon with sub-second latency.
+**WhisperOrb v2.2.1** is a complete, 100% offline, privacy-first voice dictation and native keyboard ecosystem powered by `whisper.cpp` C++/Metal/ARM64/AVX2 acceleration. Zero audio ever leaves your device: every transcription and autocorrect prediction runs locally on your phone, tablet, or laptop silicon with sub-second latency.
 
-### Key Highlights in `v2.0.0`
+### Key Highlights in `v2.2.1`
 
 1. **🤖 True Native Android Keyboard (`WhisperOrbInputMethodService`) + Cosmic Dark Pro UI**
    - **Literally Embedded 120 Hz 3D Orb**: The 3D Cosmic Black Hole Orb is built directly inside the top voice control bar of the native Android keyboard—no floating overlay clutter.
@@ -66,15 +67,15 @@
 
 ---
 
-## 📊 Complete 7-Model Whisper Catalog (`v2.0.0`)
+## 📊 Complete 7-Model Whisper Catalog (`v2.2.1`)
 
 | Tier | GGML File | Disk Size | RAM Usage | Min. Device RAM | Ideal Use Case |
 | :--- | :--- | :---: | :---: | :---: | :--- |
 | **1. ⚡ Whisper Nano** | `ggml-tiny-q5_1.bin` | 31 MB | ~120 MB | **2 GB+** | Ultra-fast short replies on any device |
 | **2. ⚡ Whisper Flash** | `ggml-base-q5_1.bin` | 60 MB | ~190 MB | **3 GB+** | Instant everyday messaging |
 | **3. ⚖️ Whisper PRO** | `ggml-small-q5_1.bin` | 190 MB | ~380 MB | **4 GB+** | Balanced daily dictation (Default on 4 GB phones) |
-| **4. 🔥 Whisper Medium** | `ggml-medium-q5_0.bin` | 539 MB | ~900 MB | **6 GB+** | High-accuracy multilingual dictation |
-| **5. 🚀 Whisper Expert (v3 Turbo Q5)** | `ggml-large-v3-turbo-q5_0.bin` | 540 MB | ~950 MB | **6 GB+** | Near-Large-v3 accuracy at high speed |
+| **4. 🔥 Whisper Medium** | `ggml-medium-q5_0.bin` | 539 MB | ~900 MB | **4 GB+** | High-accuracy multilingual dictation |
+| **5. 🚀 Whisper Expert (v3 Turbo Q5)** | `ggml-large-v3-turbo-q5_0.bin` | 540 MB | ~950 MB | **4 GB+** | Near-Large-v3 accuracy at high speed |
 | **6. 💎 Whisper Expert+ (v3 Turbo Q8)** | `ggml-large-v3-turbo-q8_0.bin` | 874 MB | ~1.32 GB | **8 GB+** | 8-bit studio fidelity |
 | **7. 👑 Whisper TITAN (Large-v3 Full)** | `ggml-large-v3-q5_0.bin` | **1.08 GB** | ~2.15 GB | **12 GB+** | **Full 1.55B parameter master model** (Pixel 9 Pro XL 16 GB, Googlebook 14, iPad Pro M4/M5, Mac) |
 
@@ -85,9 +86,9 @@
 
 ## Présentation Générale
 
-**WhisperOrb v2.0.0** est un écosystème complet de dictée vocale IA et de clavier natif **100 % hors-ligne** pour **Apple (iOS / iPadOS / macOS)** et **Android (Smartphones, Tablettes, Chromebook Plus & Googlebook 14)**, propulsé nativement en C++ par `whisper.cpp` (GPU Metal + FlashAttention sur Apple, NDK ARM64 FP16+DotProd & x86_64 AVX2+FMA avec épinglage des cœurs Prime/Performance sur Android). Aucune donnée vocale ne quitte jamais votre appareil.
+**WhisperOrb v2.2.1** est un écosystème complet de dictée vocale IA et de clavier natif **100 % hors-ligne** pour **Apple (iOS / iPadOS / macOS)** et **Android (Smartphones, Tablettes, Chromebook Plus & Googlebook 14)**, propulsé nativement en C++ par `whisper.cpp` (GPU Metal + FlashAttention sur Apple, NDK ARM64 FP16+DotProd & x86_64 AVX2+FMA avec épinglage des cœurs Prime/Performance sur Android). Aucune donnée vocale ne quitte jamais votre appareil.
 
-### Nouveautés Majeures de la `v2.0.0`
+### Nouveautés Majeures de la `v2.2.1`
 
 1. **🤖 Vrai Clavier Android Natif (`WhisperOrbInputMethodService`) & Interface Cosmic Dark Pro**
    - **Orbe 3D 120 Hz Littéralement Incrusté dans le Clavier** : L'Orbe 3D Trou Noir est intégré directement dans la barre supérieure du clavier Android natif (plus aucun overlay flottant).
@@ -115,4 +116,5 @@
 
 - **Auteur Principal** : [@bluewolfy24yt](https://github.com/bluewolfy24yt)
 - **Co-Auteur IA** : `Gemini-4-Argon`
+- **Co-Auteur IA (Audit & Correctifs v2.2.1)** : `Claude Opus 5.5` ([Claude Code](https://claude.com/claude-code))
 - **Moteur IA Natif** : Basé sur [`ggml-org/whisper.cpp`](https://github.com/ggml-org/whisper.cpp) (`b5454`) — GPU Metal + FlashAttention (Apple) & NDK ARM64 SIMD + x86_64 AVX2 + Core Pinning (Android).
