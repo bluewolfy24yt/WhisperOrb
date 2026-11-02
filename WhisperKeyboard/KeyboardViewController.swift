@@ -169,12 +169,32 @@ public final class KeyboardViewController: UIInputViewController {
     public func openParentApp() {
         guard let url = URL(string: "whisperorb://activate-mic") else { return }
         extensionContext?.open(url, completionHandler: nil)
+        // iOS 18+ : `openURL:` est devenu un no-op. Il faut appeler `open(_:options:completionHandler:)`
+        // sur l'objet UIApplication trouvé dans la chaîne des responders (sans UIApplication.shared,
+        // interdit en extension). `openURL:` reste le secours pour iOS 16–17.
+        let modernSelector = sel_registerName("openURL:options:completionHandler:")
+        let legacySelector = sel_registerName("openURL:")
         var responder: UIResponder? = self
-        let selector = sel_registerName("openURL:")
         while let current = responder {
-            if current.responds(to: selector) {
-                _ = current.perform(selector, with: url)
-                break
+            if let application = current as? UIApplication {
+                if application.responds(to: modernSelector),
+                   let method = class_getInstanceMethod(type(of: application), modernSelector) {
+                    // Appel dynamique : `UIApplication.open(_:options:completionHandler:)` est marqué
+                    // indisponible pour les extensions au niveau du compilateur.
+                    typealias OpenURLImp = @convention(c) (
+                        AnyObject, Selector, NSURL, NSDictionary, (@convention(block) (Bool) -> Void)?
+                    ) -> Void
+                    let imp = unsafeBitCast(method_getImplementation(method), to: OpenURLImp.self)
+                    imp(application, modernSelector, url as NSURL, NSDictionary(), nil)
+                    return
+                }
+                if application.responds(to: legacySelector) {
+                    _ = application.perform(legacySelector, with: url)
+                    return
+                }
+            } else if current.responds(to: legacySelector) {
+                _ = current.perform(legacySelector, with: url)
+                return
             }
             responder = current.next
         }

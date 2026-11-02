@@ -109,13 +109,7 @@ public final class WhisperEngine: ObservableObject {
             self.activeLangCString = strdup(code)
 
             if let validCtx = self.whisperContext {
-                var tempTokens = [whisper_token](repeating: 0, count: 16)
-                let count = promptSeed.withCString { cStr in
-                    tempTokens.withUnsafeMutableBufferPointer { buf in
-                        whisper_tokenize(validCtx, cStr, buf.baseAddress, Int32(buf.count))
-                    }
-                }
-                self.cachedPromptTokens = count > 0 ? Array(tempTokens.prefix(Int(count))) : []
+                self.cachedPromptTokens = Self.tokenizePrompt(promptSeed, ctx: validCtx)
             }
         }
     }
@@ -265,15 +259,7 @@ public final class WhisperEngine: ObservableObject {
 
                 var extractedTokens: [whisper_token] = []
                 if let validCtx = ctx {
-                    var tempTokens = [whisper_token](repeating: 0, count: 16)
-                    let count = promptSeed.withCString { cStr in
-                        tempTokens.withUnsafeMutableBufferPointer { buf in
-                            whisper_tokenize(validCtx, cStr, buf.baseAddress, Int32(buf.count))
-                        }
-                    }
-                    if count > 0 {
-                        extractedTokens = Array(tempTokens.prefix(Int(count)))
-                    }
+                    extractedTokens = Self.tokenizePrompt(promptSeed, ctx: validCtx)
 
                     // Éviter le passe de warmup sur les modèles lourds (>= 500 Mo) sur appareils <= 4 Go
                     // pour ne pas doubler le pic mémoire immédiatement après l'initialisation.
@@ -309,6 +295,26 @@ public final class WhisperEngine: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Tokenise le prompt initial. Si le tampon de 16 tokens est trop petit, whisper_tokenize renvoie
+    /// -(nombre requis) : on agrandit le tampon et on relance au lieu d'ignorer le prompt silencieusement.
+    private static func tokenizePrompt(_ prompt: String, ctx: OpaquePointer) -> [whisper_token] {
+        var tempTokens = [whisper_token](repeating: 0, count: 16)
+        var count = prompt.withCString { cStr in
+            tempTokens.withUnsafeMutableBufferPointer { buf in
+                whisper_tokenize(ctx, cStr, buf.baseAddress, Int32(buf.count))
+            }
+        }
+        if count < 0 {
+            tempTokens = [whisper_token](repeating: 0, count: Int(-count))
+            count = prompt.withCString { cStr in
+                tempTokens.withUnsafeMutableBufferPointer { buf in
+                    whisper_tokenize(ctx, cStr, buf.baseAddress, Int32(buf.count))
+                }
+            }
+        }
+        return count > 0 ? Array(tempTokens.prefix(Int(count))) : []
     }
 
     /// Doit être appelé sur `inferenceQueue` pour garantir la validité de `activeLangCString`.
