@@ -68,6 +68,11 @@ class WhisperOrbEmbeddedBarController private constructor(
     private var isQuickSelectorOpen: Boolean = false
     private var isNumericFieldFocused: Boolean = false
 
+    // Vrai uniquement quand le clavier WhisperOrb est réellement affiché (InputConnection valide).
+    // Sinon le texte dicté (ex : Bulle Flottante avec un autre clavier) passe par le Service d'Accessibilité.
+    @Volatile
+    private var isInputViewActive: Boolean = false
+
     private var collapseExpandBtn: TextView? = null
     private var statusDotView: View? = null
     private var statusTitleTv: TextView? = null
@@ -104,21 +109,54 @@ class WhisperOrbEmbeddedBarController private constructor(
         }
     }
 
+    // Signature du dernier état affiché : pendant l'écoute le moteur notifie ~15 fois/s pour le niveau audio,
+    // inutile alors de reconstruire tout le bandeau (et le panneau ⚙) sur le thread principal.
+    private var lastRenderedSignature: String? = null
+
+    private fun currentEngineSignature(): String {
+        return listOf(
+            engine.orbState,
+            engine.isLoadingModel,
+            engine.selectedModel.id,
+            engine.selectedLanguage.code,
+            engine.lastInsertedSentenceLength,
+            engine.isGboardBarEnabled,
+            engine.isKeyboardCollapsed,
+            engine.bgHex,
+            engine.fgHex,
+            engine.autoPunctuation,
+            engine.vadSilenceThresholdSeconds,
+            engine.simulateModest4GBDevice,
+            engine.forceUnlockAllModels,
+            engine.loadedTier?.id,
+            autoSendAfterDictation
+        ).joinToString("|")
+    }
+
     private val engineListener: () -> Unit = {
         mainHandler.post {
             ensureEngineCallbacksHooked()
-            applyBarAndKeyboardLayoutState()
+            val signature = currentEngineSignature()
+            if (signature == lastRenderedSignature) {
+                // Seul le niveau audio a changé
+                orbView?.audioLevel = engine.currentAudioLevel
+            } else {
+                lastRenderedSignature = signature
+                applyBarAndKeyboardLayoutState()
+                refreshBarAndPanelContent()
+            }
+        }
+    }
+
+    private val downloaderListener: () -> Unit = {
+        mainHandler.post {
             refreshBarAndPanelContent()
         }
     }
 
     init {
         engine.addListener(engineListener)
-        downloader.onStateChanged = {
-            mainHandler.post {
-                refreshBarAndPanelContent()
-            }
-        }
+        downloader.addStateListener(downloaderListener)
         ensureEngineCallbacksHooked()
     }
 
@@ -183,6 +221,7 @@ class WhisperOrbEmbeddedBarController private constructor(
     override fun onStartInputView(ime: InputMethodService, info: EditorInfo?, restarting: Boolean) {
         currentIme = ime
         currentEditorInfo = info
+        isInputViewActive = true
         ensureEngineCallbacksHooked()
 
         val inputType = info?.inputType ?: 0
@@ -204,6 +243,7 @@ class WhisperOrbEmbeddedBarController private constructor(
     }
 
     override fun onFinishInputView(ime: InputMethodService, finishingInput: Boolean) {
+        isInputViewActive = false
         isQuickSelectorOpen = false
         isCollapsedMode = false
         engine.isKeyboardCollapsed = false
@@ -1194,7 +1234,7 @@ class WhisperOrbEmbeddedBarController private constructor(
 
     private fun handleTranscribedText(text: String) {
         val ime = currentIme
-        val ic = ime?.currentInputConnection
+        val ic = if (isInputViewActive) ime?.currentInputConnection else null
         if (ime != null && ic != null) {
             try {
                 val before = ic.getTextBeforeCursor(2, 0)?.toString() ?: ""
@@ -1228,12 +1268,17 @@ class WhisperOrbEmbeddedBarController private constructor(
             }
         }
 
-        fallbackTranscribeCallback?.invoke(text)
+        val fallback = fallbackTranscribeCallback
+        if (fallback != null) {
+            fallback.invoke(text)
+        } else {
+            WhisperOrbAccessibilityService.activeInstance?.insertTranscribedTextIntoActiveField(text)
+        }
     }
 
     private fun handleDeleteLastSentence(len: Int) {
         if (len <= 0) return
-        val ic = currentIme?.currentInputConnection
+        val ic = if (isInputViewActive) currentIme?.currentInputConnection else null
         if (ic != null) {
             try {
                 ic.deleteSurroundingText(len, 0)
@@ -1243,7 +1288,12 @@ class WhisperOrbEmbeddedBarController private constructor(
             } catch (_: Exception) {
             }
         }
-        fallbackDeleteCallback?.invoke(len)
+        val deleteFallback = fallbackDeleteCallback
+        if (deleteFallback != null) {
+            deleteFallback.invoke(len)
+        } else {
+            WhisperOrbAccessibilityService.activeInstance?.deleteLastCharactersFromActiveField(len)
+        }
         engine.lastInsertedSentenceLength = 0
         refreshBarAndPanelContent()
     }

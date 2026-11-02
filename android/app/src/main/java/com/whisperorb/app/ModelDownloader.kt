@@ -3,6 +3,7 @@ package com.whisperorb.app
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -32,7 +33,27 @@ class ModelDownloader private constructor(private val context: Context) {
     private val activeJobs = mutableMapOf<WhisperModelTier, Job>()
     val downloadProgress = mutableMapOf<WhisperModelTier, Float>()
     var errorMessage: String? = null
-    var onStateChanged: (() -> Unit)? = null
+
+    // Plusieurs écouteurs (Clavier intégré + Application) : l'un n'écrase plus jamais l'autre.
+    private val stateListeners = mutableListOf<() -> Unit>()
+
+    fun addStateListener(listener: () -> Unit) {
+        synchronized(stateListeners) {
+            if (!stateListeners.contains(listener)) stateListeners.add(listener)
+        }
+    }
+
+    fun removeStateListener(listener: () -> Unit) {
+        synchronized(stateListeners) {
+            stateListeners.remove(listener)
+        }
+    }
+
+    /** Doit être appelé sur le thread principal. */
+    private fun dispatchStateChanged() {
+        val snapshot = synchronized(stateListeners) { stateListeners.toList() }
+        for (l in snapshot) l.invoke()
+    }
 
     /**
      * Répertoire persistant dans /sdcard/Android/media/com.whisperorb.app/Models/
@@ -120,8 +141,8 @@ class ModelDownloader private constructor(private val context: Context) {
                     throw RuntimeException("HTTP $code")
                 }
 
-                val totalBytes = conn.contentLengthLong.takeIf { it > 0 }
-                    ?: (tier.sizeMB.toLong() * 1024L * 1024L)
+                val announcedBytes = conn.contentLengthLong.takeIf { it > 0 }
+                val totalBytes = announcedBytes ?: (tier.sizeMB.toLong() * 1024L * 1024L)
 
                 conn.inputStream.use { input ->
                     FileOutputStream(tempFile).use { output ->
@@ -139,30 +160,45 @@ class ModelDownloader private constructor(private val context: Context) {
                                 val pct = (downloaded.toFloat() / totalBytes.toFloat()).coerceIn(0f, 0.99f)
                                 withContext(Dispatchers.Main) {
                                     downloadProgress[tier] = pct
-                                    onStateChanged?.invoke()
+                                    dispatchStateChanged()
                                 }
                             }
                         }
                     }
                 }
 
-                if (isActive && tempFile.length() > 20L * 1024L * 1024L) {
-                    if (destFile.exists()) destFile.delete()
-                    tempFile.renameTo(destFile)
-                    withContext(Dispatchers.Main) {
-                        downloadProgress.remove(tier)
-                        activeJobs.remove(tier)
-                        onStateChanged?.invoke()
-                        onComplete?.invoke(tier)
-                    }
+                if (!isActive) {
+                    throw CancellationException("Téléchargement annulé")
                 }
+                val receivedBytes = tempFile.length()
+                // Connexion coupée en cours de route : le fichier tronqué n'est JAMAIS accepté comme modèle
+                if (announcedBytes != null && receivedBytes != announcedBytes) {
+                    throw RuntimeException("fichier incomplet (${receivedBytes / (1024L * 1024L)} / ${announcedBytes / (1024L * 1024L)} Mo)")
+                }
+                if (receivedBytes <= 20L * 1024L * 1024L) {
+                    throw RuntimeException("fichier trop petit (${receivedBytes / 1024L} Ko)")
+                }
+                if (destFile.exists()) destFile.delete()
+                if (!tempFile.renameTo(destFile)) {
+                    throw RuntimeException("impossible d'enregistrer ${tier.fileName}")
+                }
+                withContext(Dispatchers.Main) {
+                    downloadProgress.remove(tier)
+                    activeJobs.remove(tier)
+                    dispatchStateChanged()
+                    onComplete?.invoke(tier)
+                }
+            } catch (e: CancellationException) {
+                // Annulation volontaire (cancelDownload) : nettoyage silencieux, aucun message d'erreur
+                if (tempFile.exists()) tempFile.delete()
+                throw e
             } catch (e: Exception) {
                 if (tempFile.exists()) tempFile.delete()
                 withContext(Dispatchers.Main) {
                     errorMessage = "Erreur téléchargement (${tier.shortBadgeName}) : ${e.message}"
                     downloadProgress.remove(tier)
                     activeJobs.remove(tier)
-                    onStateChanged?.invoke()
+                    dispatchStateChanged()
                 }
             } finally {
                 conn?.disconnect()
@@ -189,7 +225,7 @@ class ModelDownloader private constructor(private val context: Context) {
 
     private fun notifyUpdate() {
         CoroutineScope(Dispatchers.Main).launch {
-            onStateChanged?.invoke()
+            dispatchStateChanged()
         }
     }
 }

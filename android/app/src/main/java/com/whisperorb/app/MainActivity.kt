@@ -201,10 +201,12 @@ fun WhisperOrbContentView(lifecycleRefreshTick: Int = 0) {
 
     DisposableEffect(engine, downloader) {
         val listener: () -> Unit = { uiTick++ }
+        val downloadListener: () -> Unit = { uiTick++ }
         engine.addListener(listener)
-        downloader.onStateChanged = { uiTick++ }
+        downloader.addStateListener(downloadListener)
         onDispose {
             engine.removeListener(listener)
+            downloader.removeStateListener(downloadListener)
         }
     }
 

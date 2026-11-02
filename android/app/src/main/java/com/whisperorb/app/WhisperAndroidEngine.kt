@@ -12,6 +12,7 @@ import android.view.inputmethod.InputMethodManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
@@ -19,6 +20,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
 import kotlin.math.tanh
+import java.util.concurrent.Executors
 
 class WhisperAndroidEngine private constructor(private val context: Context) {
 
@@ -70,6 +72,12 @@ class WhisperAndroidEngine private constructor(private val context: Context) {
 
     private val prefs = context.getSharedPreferences("whisperorb_prefs", Context.MODE_PRIVATE)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+    // File d'exécution native SÉRIE (équivalent de `inferenceQueue` sur iOS) : init / free / transcription
+    // ne s'exécutent jamais en parallèle → aucun use-after-free du contexte whisper.cpp.
+    private val nativeDispatcher = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "WhisperOrb-NativeInference")
+    }.asCoroutineDispatcher()
 
     var selectedModel: WhisperModelTier
         get() = WhisperModelTier.fromId(
@@ -218,7 +226,10 @@ class WhisperAndroidEngine private constructor(private val context: Context) {
     var liveTestTranscript: String = ""
     var lastInsertedSentenceLength: Int = 0
 
+    @Volatile
     private var nativeContextPtr: Long = 0L
+    private var loadingTier: WhisperModelTier? = null
+    private val pendingOnReadyCallbacks = mutableListOf<() -> Unit>()
     private var audioRecord: AudioRecord? = null
     @Volatile
     private var isRecordingAudio: Boolean = false
@@ -259,30 +270,44 @@ class WhisperAndroidEngine private constructor(private val context: Context) {
             notifyListeners()
             return
         }
-        if (loadedTier == tier && nativeContextPtr != 0L) {
+        if (loadedTier == tier && nativeContextPtr != 0L && !isLoadingModel) {
             onReady?.invoke()
+            return
+        }
+        if (isLoadingModel && loadingTier == tier) {
+            // Chargement identique déjà en cours : on ne relance pas un 2e init (double free / fuite RAM)
+            onReady?.let { pendingOnReadyCallbacks.add(it) }
             return
         }
 
         isLoadingModel = true
+        loadingTier = tier
+        pendingOnReadyCallbacks.clear()
+        onReady?.let { pendingOnReadyCallbacks.add(it) }
         lastErrorMessage = null
         statusBannerMessage = "Chargement C++ NDK de ${tier.shortBadgeName} (${tier.ramUsageMB} Mo RAM)..."
         notifyListeners()
 
         val modelPath = downloader.localModelFile(tier).absolutePath
-        scope.launch(Dispatchers.Default) {
+        scope.launch(nativeDispatcher) {
             if (nativeContextPtr != 0L) {
                 WhisperNativeBridge.freeContext(nativeContextPtr)
                 nativeContextPtr = 0L
             }
             val newPtr = WhisperNativeBridge.initContext(modelPath)
+            nativeContextPtr = newPtr
+            val cpuSummary = if (newPtr != 0L) WhisperNativeBridge.getCpuTopologySummary() else ""
             withContext(Dispatchers.Main) {
-                nativeContextPtr = newPtr
+                // Un autre modèle a été demandé entre-temps : son chargement (en file) finalisera l'état.
+                if (loadingTier != tier) return@withContext
                 loadedTier = if (newPtr != 0L) tier else null
                 isLoadingModel = false
+                loadingTier = null
+                val callbacks = pendingOnReadyCallbacks.toList()
+                pendingOnReadyCallbacks.clear()
                 if (newPtr != 0L) {
-                    statusBannerMessage = "${tier.shortBadgeName} actif • ${WhisperNativeBridge.getCpuTopologySummary()}"
-                    onReady?.invoke()
+                    statusBannerMessage = "${tier.shortBadgeName} actif • $cpuSummary"
+                    callbacks.forEach { it.invoke() }
                 } else {
                     lastErrorMessage = "Échec de l'initialisation C++ de ${tier.displayName}."
                     statusBannerMessage = "Erreur de chargement du modèle"
@@ -293,12 +318,15 @@ class WhisperAndroidEngine private constructor(private val context: Context) {
     }
 
     fun unloadCurrentModel() {
-        if (nativeContextPtr != 0L) {
-            val ptr = nativeContextPtr
-            nativeContextPtr = 0L
+        if (nativeContextPtr != 0L || loadedTier != null) {
             loadedTier = null
-            scope.launch(Dispatchers.Default) {
-                WhisperNativeBridge.freeContext(ptr)
+            scope.launch(nativeDispatcher) {
+                // Exécuté APRÈS toute transcription en cours sur la même file série
+                val ptr = nativeContextPtr
+                nativeContextPtr = 0L
+                if (ptr != 0L) {
+                    WhisperNativeBridge.freeContext(ptr)
+                }
             }
             notifyListeners()
         }
@@ -481,17 +509,24 @@ class WhisperAndroidEngine private constructor(private val context: Context) {
         val whisperLangCode = langSelection.resolvedWhisperCode
         val isSmallModel = (loadedTier == WhisperModelTier.NANO || loadedTier == WhisperModelTier.ECLAIR)
         val promptSeed = if (isSmallModel || langSelection == WhisperLanguageSelection.AUTO) "" else langSelection.initialPunctuationPrompt
-        val threads = WhisperNativeBridge.getOptimalPerformanceThreadCount()
         val startMs = System.currentTimeMillis()
 
-        scope.launch(Dispatchers.Default) {
-            val rawText = WhisperNativeBridge.transcribeAudio(
-                contextPtr = nativeContextPtr,
-                audioSamples = conditioned,
-                languageCode = whisperLangCode,
-                initialPrompt = promptSeed,
-                numThreads = threads
-            )
+        scope.launch(nativeDispatcher) {
+            // Pointeur lu sur la file série native : il ne peut pas être libéré pendant whisper_full
+            val ptr = nativeContextPtr
+            // Épinglage des cœurs Performance sur le thread d'inférence (et non sur le thread UI)
+            val threads = WhisperNativeBridge.getOptimalPerformanceThreadCount()
+            val rawText = if (ptr != 0L) {
+                WhisperNativeBridge.transcribeAudio(
+                    contextPtr = ptr,
+                    audioSamples = conditioned,
+                    languageCode = whisperLangCode,
+                    initialPrompt = promptSeed,
+                    numThreads = threads
+                )
+            } else {
+                ""
+            }
             val elapsedMs = (System.currentTimeMillis() - startMs).toInt()
             withContext(Dispatchers.Main) {
                 orbState = WhisperOrbState.IDLE

@@ -84,6 +84,8 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
     private var isBubbleAttached: Boolean = false
     private var snapAnimator: ValueAnimator? = null
 
+    private var lastBubbleBackgroundState: WhisperOrbState? = null
+
     private var bubblePosX: Int = -1
     private var bubblePosY: Int = -1
 
@@ -309,7 +311,11 @@ class WhisperOrbAccessibilityService : AccessibilityService() {
             audioLevel = engine.currentAudioLevel
             orbState = state
         }
-        bubbleContainer?.background = createBubbleBackgroundDrawable(state)
+        // Le fond n'est recréé que si l'état change (et non à chaque notification de niveau audio)
+        if (state != lastBubbleBackgroundState) {
+            lastBubbleBackgroundState = state
+            bubbleContainer?.background = createBubbleBackgroundDrawable(state)
+        }
     }
 
     private fun attachFloatingBubbleIfNeeded() {
