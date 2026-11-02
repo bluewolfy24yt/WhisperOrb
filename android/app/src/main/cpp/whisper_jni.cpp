@@ -225,7 +225,9 @@ Java_com_whisperorb_app_WhisperNativeBridge_transcribeAudio(
     struct whisper_full_params wparams = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
     bool isAuto = (langStr == "auto" || langStr.empty());
     wparams.language = isAuto ? "auto" : langStr.c_str();
-    wparams.detect_language = isAuto;
+    // IMPORTANT : `language = "auto"` suffit pour auto-détecter la langue ET transcrire.
+    // `detect_language = true` fait sortir whisper_full juste après la détection, sans aucun segment.
+    wparams.detect_language = false;
     wparams.translate = false;
     wparams.n_threads = optimalThreads;
     wparams.single_segment = true;
@@ -253,6 +255,11 @@ Java_com_whisperorb_app_WhisperNativeBridge_transcribeAudio(
     if (!promptStr.empty() && !isAuto) {
         promptTokens.resize(16);
         int nTokens = whisper_tokenize(ctx, promptStr.c_str(), promptTokens.data(), (int)promptTokens.size());
+        if (nTokens < 0) {
+            // Tampon trop petit : whisper_tokenize renvoie -(nombre de tokens requis)
+            promptTokens.resize(-nTokens);
+            nTokens = whisper_tokenize(ctx, promptStr.c_str(), promptTokens.data(), (int)promptTokens.size());
+        }
         if (nTokens > 0) {
             promptTokens.resize(nTokens);
             wparams.prompt_tokens = promptTokens.data();
