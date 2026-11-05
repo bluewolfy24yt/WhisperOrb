@@ -669,7 +669,7 @@ public struct KeyboardLayoutView: View {
             .buttonStyle(.plain)
 
             Button(action: {
-                handleVoiceDictationTrigger()
+                handleStatusCapsuleTap()
             }) {
                 HStack(spacing: 6) {
                     Circle()
@@ -785,7 +785,7 @@ public struct KeyboardLayoutView: View {
             .buttonStyle(.plain)
 
             Button(action: {
-                handleVoiceDictationTrigger()
+                handleStatusCapsuleTap()
             }) {
                 HStack(spacing: 6) {
                     Circle()
@@ -889,15 +889,21 @@ public struct KeyboardLayoutView: View {
     private func handleVoiceDictationTrigger() {
         let generator = UIImpactFeedbackGenerator(style: .medium)
         generator.impactOccurred()
-        // Sans accès complet, le clavier ne peut pas joindre l'app : on y envoie l'utilisateur
-        guard hasFullAccessProvider() else {
-            onOpenParentApp()
-            return
-        }
+        // L'orbe n'ouvre jamais l'app : si le moteur est arrêté, la pastille d'état l'indique
+        guard hasFullAccessProvider() else { return }
         appGroup.reloadStateFromChannels()
         appGroup.requestToggleRecordingFromKeyboard()
-        if !appGroup.isBackgroundEngineActive {
+    }
+
+    /// Seul geste qui ouvre l'app, et uniquement quand le micro doit être activé.
+    private func handleStatusCapsuleTap() {
+        appGroup.reloadStateFromChannels()
+        let engineIsOff = !appGroup.isBackgroundEngineActive && appGroup.orbState == .idle
+        if !hasFullAccessProvider() || engineIsOff {
+            triggerLightHaptic()
             onOpenParentApp()
+        } else {
+            handleVoiceDictationTrigger()
         }
     }
 
@@ -923,7 +929,7 @@ public struct KeyboardLayoutView: View {
             return isIPad ? "Activez l'accès complet dans Réglages" : "Accès complet requis"
         }
         if !appGroup.isBackgroundEngineActive && appGroup.orbState == .idle {
-            return isIPad ? "Activez le micro dans WhisperOrb" : "Micro veille"
+            return isIPad ? "Touchez ici pour activer le micro" : "Activer le micro"
         }
         switch appGroup.orbState {
         case .idle:

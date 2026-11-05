@@ -742,6 +742,7 @@ public struct WhisperSharedStatePayload: Codable, Equatable {
     public var isSmartAutocorrectEnabled: Bool?
     public var downloadedModelRaws: [String]?
     public var toggleRecordingRequestCount: Int?
+    public var toggleRequestedAt: TimeInterval?
     public var updatedAt: TimeInterval
 }
 
@@ -903,7 +904,6 @@ public final class AppGroupManager: ObservableObject {
         static let liveAudioLevel = "whisperorb.liveAudioLevel"
         static let engineHeartbeatTimestamp = "whisperorb.engineHeartbeatTimestamp"
         static let toggleRecordingRequestCount = "whisperorb.toggleRecordingRequestCount"
-        static let toggleRequestTimestamp = "whisperorb.toggleRequestTimestamp"
         static let sharedFileName = "whisperorb_shared_state.json"
         static let recentEmojisList = "whisperorb.recentEmojisList"
     }
@@ -926,7 +926,7 @@ public final class AppGroupManager: ObservableObject {
         )
         self.toggleRecordingRequestCount = existingToggleCount
         // Une demande récente du clavier est justement la raison de ce lancement : ne pas la jeter.
-        let toggleRequestAge = Date().timeIntervalSince1970 - userDefaults.double(forKey: Keys.toggleRequestTimestamp)
+        let toggleRequestAge = Date().timeIntervalSince1970 - (readFreshestPayload()?.toggleRequestedAt ?? 0)
         let hasFreshToggleRequest = !isKeyboardExtensionProcess && existingToggleCount > 0 && toggleRequestAge < 10.0
         self.lastHandledToggleRequestCount = hasFreshToggleRequest ? existingToggleCount - 1 : existingToggleCount
 
@@ -959,16 +959,26 @@ public final class AppGroupManager: ObservableObject {
 
     // MARK: - Heartbeat du Moteur Audio en Arrière-Plan
 
+    // Fichier en plus de UserDefaults : entre l'app et le clavier, UserDefaults peut rester
+    // en retard, et un moteur vivant passerait alors pour arrêté.
+    private var heartbeatFileURL: URL {
+        sharedContainerURL.appendingPathComponent("whisperorb_heartbeat", isDirectory: false)
+    }
+
     public func recordEngineHeartbeat() {
-        userDefaults.set(Date().timeIntervalSince1970, forKey: Keys.engineHeartbeatTimestamp)
+        let now = Date().timeIntervalSince1970
+        userDefaults.set(now, forKey: Keys.engineHeartbeatTimestamp)
+        try? String(now).write(to: heartbeatFileURL, atomically: false, encoding: .utf8)
     }
 
     public func clearEngineHeartbeat() {
         userDefaults.set(0.0, forKey: Keys.engineHeartbeatTimestamp)
+        try? "0".write(to: heartbeatFileURL, atomically: false, encoding: .utf8)
     }
 
     public var isEngineHeartbeatFresh: Bool {
-        let lastBeat = userDefaults.double(forKey: Keys.engineHeartbeatTimestamp)
+        let fileBeat = (try? String(contentsOf: heartbeatFileURL, encoding: .utf8)).flatMap { Double($0) } ?? 0
+        let lastBeat = max(fileBeat, userDefaults.double(forKey: Keys.engineHeartbeatTimestamp))
         guard lastBeat > 0 else { return false }
         return (Date().timeIntervalSince1970 - lastBeat) < 6.0
     }
@@ -1159,6 +1169,7 @@ public final class AppGroupManager: ObservableObject {
             isSmartAutocorrectEnabled: isSmartAutocorrectEnabled,
             downloadedModelRaws: authoritativeDownloadedModels,
             toggleRecordingRequestCount: latestToggleCount,
+            toggleRequestedAt: existing?.toggleRequestedAt,
             updatedAt: now
         )
 
@@ -1221,7 +1232,9 @@ public final class AppGroupManager: ObservableObject {
         }
         if remoteToggleCount > self.lastHandledToggleRequestCount {
             self.lastHandledToggleRequestCount = remoteToggleCount
-            if !isKeyboardExtensionProcess {
+            // Une demande ancienne ne doit pas lancer l'écoute quand l'app est rouverte plus tard
+            let requestAge = Date().timeIntervalSince1970 - (validPayload.toggleRequestedAt ?? 0)
+            if !isKeyboardExtensionProcess && requestAge < 15.0 {
                 shouldFireToggleCallback = true
             }
         }
@@ -1258,7 +1271,7 @@ public final class AppGroupManager: ObservableObject {
                 self.downloadedModelRaws = remoteDownloaded
             }
             if self.isKeyboardExtensionProcess {
-                let engineAlive = validPayload.isBackgroundEngineActive && self.isEngineHeartbeatFresh
+                let engineAlive = self.isEngineHeartbeatFresh
                 if self.isBackgroundEngineActive != engineAlive {
                     self.isBackgroundEngineActive = engineAlive
                 }
@@ -1334,9 +1347,12 @@ public final class AppGroupManager: ObservableObject {
         toggleRecordingRequestCount = nextCount
         lastHandledToggleRequestCount = nextCount
         userDefaults.set(nextCount, forKey: Keys.toggleRecordingRequestCount)
-        userDefaults.set(Date().timeIntervalSince1970, forKey: Keys.toggleRequestTimestamp)
 
-        if !mutateSharedPayload({ $0.toggleRecordingRequestCount = nextCount }) {
+        let requestedAt = Date().timeIntervalSince1970
+        if !mutateSharedPayload({
+            $0.toggleRecordingRequestCount = nextCount
+            $0.toggleRequestedAt = requestedAt
+        }) {
             persistAndBroadcastState(postDarwinNotification: false)
         }
 
