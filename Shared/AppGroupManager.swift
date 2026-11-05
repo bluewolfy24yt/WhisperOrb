@@ -4,6 +4,7 @@ import UIKit
 import Combine
 import CoreFoundation
 import Metal
+import GameController
 
 // MARK: - Sélecteur Intelligent de Langue Multilingue (Zéro "fr" codé en dur)
 
@@ -241,7 +242,7 @@ public enum WhisperModelTier: String, CaseIterable, Codable, Identifiable {
         case .medium:
             return 539
         case .zeroFaute:
-            return 540
+            return 548
         case .expertPlus:
             return 874
         case .titan:
@@ -272,7 +273,7 @@ public enum WhisperModelTier: String, CaseIterable, Codable, Identifiable {
     public var minimumRequiredRAMGB: Double {
         switch self {
         case .nano:
-            return 2.0
+            return 1.7
         case .eclair:
             return 2.8
         case .normal:
@@ -335,7 +336,16 @@ public struct HardwareDetector {
     }
 
     public static func effectiveMemoryGB(simulate4GB: Bool) -> Double {
-        return simulate4GB ? 4.0 : physicalMemoryGB
+        return simulate4GB ? min(4.0, physicalMemoryGB) : physicalMemoryGB
+    }
+
+    /// FlashAttention Metal exige la famille Apple7 (A14 / M1 et plus récents).
+    public static let supportsMetalFlashAttention: Bool =
+        MTLCreateSystemDefaultDevice()?.supportsFamily(.apple7) ?? false
+
+    /// Magic Keyboard / Smart Keyboard : le clavier logiciel peut ne pas être affiché.
+    public static var hasHardwareKeyboard: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad && GCKeyboard.coalesced != nil
     }
 
     public static func isTierUnlocked(_ tier: WhisperModelTier, simulate4GB: Bool = false, forceUnlock: Bool = false) -> Bool {
@@ -389,7 +399,11 @@ public struct HardwareDetector {
         }
 
         switch code {
-        // --- Gamme iPad Pro (A12X / A12Z jusqu'à M4, M5 & futurs) ---
+        // --- Gamme iPad Pro (A9X jusqu'à M4, M5 & futurs) ---
+        case "iPad6,3", "iPad6,4", "iPad6,7", "iPad6,8":
+            return "iPad Pro — A9X"
+        case "iPad7,1", "iPad7,2", "iPad7,3", "iPad7,4":
+            return "iPad Pro — A10X Fusion"
         case "iPad8,1", "iPad8,2", "iPad8,3", "iPad8,4", "iPad8,5", "iPad8,6", "iPad8,7", "iPad8,8":
             return "iPad Pro — A12X Bionic"
         case "iPad8,9", "iPad8,10":
@@ -428,6 +442,12 @@ public struct HardwareDetector {
             return "iPad mini (7e gén) — A17 Pro"
 
         // --- Gamme iPad Standard ---
+        case "iPad6,11", "iPad6,12":
+            return "iPad (5e gén) — A9"
+        case "iPad7,5", "iPad7,6":
+            return "iPad (6e gén) — A10 Fusion"
+        case "iPad7,11", "iPad7,12":
+            return "iPad (7e gén) — A10 Fusion"
         case "iPad11,6", "iPad11,7":
             return "iPad (8e gén) — A12 Bionic"
         case "iPad12,1", "iPad12,2":
@@ -554,8 +574,10 @@ public struct HardwareDetector {
             return .zeroFaute
         } else if ram >= 3.6 {
             return .normal
-        } else {
+        } else if ram >= 2.8 {
             return .eclair
+        } else {
+            return .nano
         }
     }
 
@@ -568,10 +590,10 @@ public struct HardwareDetector {
         if isRunningOnMac {
             return max(4, min(8, totalCores - 2))
         }
-        if UIDevice.current.userInterfaceIdiom == .phone || totalCores <= 6 {
+        if UIDevice.current.userInterfaceIdiom == .phone {
             return 2
         }
-        return min(6, max(4, totalCores / 2))
+        return min(totalCores, min(6, max(4, totalCores / 2)))
     }
 
     public static var telemetrySummary: String {
@@ -788,7 +810,7 @@ public final class AppGroupManager: ObservableObject {
         didSet {
             if !isApplyingRemoteUpdate && oldValue != simulateModest4GBDevice {
                 if simulateModest4GBDevice && !HardwareDetector.isTierUnlocked(selectedModel, simulate4GB: true, forceUnlock: forceUnlockAllModels) {
-                    selectedModel = .zeroFaute
+                    selectedModel = HardwareDetector.recommendedTier(simulate4GB: true)
                 }
                 persistAndBroadcastState()
             }
@@ -799,7 +821,7 @@ public final class AppGroupManager: ObservableObject {
         didSet {
             if !isApplyingRemoteUpdate && oldValue != forceUnlockAllModels {
                 if !forceUnlockAllModels && !HardwareDetector.isTierUnlocked(selectedModel, simulate4GB: simulateModest4GBDevice, forceUnlock: false) {
-                    selectedModel = .zeroFaute
+                    selectedModel = HardwareDetector.recommendedTier(simulate4GB: simulateModest4GBDevice)
                 }
                 persistAndBroadcastState()
             }
@@ -829,7 +851,7 @@ public final class AppGroupManager: ObservableObject {
         didSet { if !isApplyingRemoteUpdate && oldValue != autoPunctuation { persistAndBroadcastState() } }
     }
 
-    @Published public var vadSilenceThresholdSeconds: Double = 0.65 {
+    @Published public var vadSilenceThresholdSeconds: Double = 1.0 {
         didSet { if !isApplyingRemoteUpdate && oldValue != vadSilenceThresholdSeconds { persistAndBroadcastState() } }
     }
 
@@ -849,7 +871,14 @@ public final class AppGroupManager: ObservableObject {
         didSet { if !isApplyingRemoteUpdate && oldValue != downloadedModelRaws { persistAndBroadcastState() } }
     }
 
-    public var onToggleRecordingRequested: (() -> Void)?
+    public var onToggleRecordingRequested: (() -> Void)? {
+        didSet {
+            // Demande reçue avant la création du moteur (lancement à froid depuis le clavier)
+            guard hasDeferredToggle, let callback = onToggleRecordingRequested else { return }
+            hasDeferredToggle = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { callback() }
+        }
+    }
 
     // MARK: - Propriétés Internes
 
@@ -862,6 +891,7 @@ public final class AppGroupManager: ObservableObject {
     private var lastHandledToggleRequestCount: Int = 0
     private var lastToggleTriggerTime: TimeInterval = 0
     private var lastAudioBroadcastTime: TimeInterval = 0
+    private var hasDeferredToggle: Bool = false
 
     private var isKeyboardExtensionProcess: Bool {
         Bundle.main.bundlePath.hasSuffix(".appex")
@@ -873,6 +903,7 @@ public final class AppGroupManager: ObservableObject {
         static let liveAudioLevel = "whisperorb.liveAudioLevel"
         static let engineHeartbeatTimestamp = "whisperorb.engineHeartbeatTimestamp"
         static let toggleRecordingRequestCount = "whisperorb.toggleRecordingRequestCount"
+        static let toggleRequestTimestamp = "whisperorb.toggleRequestTimestamp"
         static let sharedFileName = "whisperorb_shared_state.json"
         static let recentEmojisList = "whisperorb.recentEmojisList"
     }
@@ -894,7 +925,10 @@ public final class AppGroupManager: ObservableObject {
             readFreshestPayload()?.toggleRecordingRequestCount ?? 0
         )
         self.toggleRecordingRequestCount = existingToggleCount
-        self.lastHandledToggleRequestCount = existingToggleCount
+        // Une demande récente du clavier est justement la raison de ce lancement : ne pas la jeter.
+        let toggleRequestAge = Date().timeIntervalSince1970 - userDefaults.double(forKey: Keys.toggleRequestTimestamp)
+        let hasFreshToggleRequest = !isKeyboardExtensionProcess && existingToggleCount > 0 && toggleRequestAge < 10.0
+        self.lastHandledToggleRequestCount = hasFreshToggleRequest ? existingToggleCount - 1 : existingToggleCount
 
         if !userDefaults.bool(forKey: Keys.hasLaunchedBefore) {
             self.selectedModel = HardwareDetector.recommendedTier
@@ -963,6 +997,10 @@ public final class AppGroupManager: ObservableObject {
         return dir
     }
 
+    public var isSharedContainerAvailable: Bool {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: Self.appGroupIdentifier) != nil
+    }
+
     private var sharedStateFileURL: URL {
         sharedContainerURL.appendingPathComponent(Keys.sharedFileName, isDirectory: false)
     }
@@ -992,6 +1030,45 @@ public final class AppGroupManager: ObservableObject {
         return freshest
     }
 
+    // Verrou inter-processus court et non bloquant : on ne garde jamais un verrou en attente,
+    // car iOS tue une app suspendue qui détient un verrou dans un conteneur partagé.
+    private func acquireStateLock() -> Int32 {
+        let path = sharedContainerURL.appendingPathComponent("whisperorb_state.lock").path
+        let fd = open(path, O_CREAT | O_RDWR, 0o644)
+        guard fd >= 0 else { return -1 }
+        for _ in 0..<20 {
+            if flock(fd, LOCK_EX | LOCK_NB) == 0 { return fd }
+            usleep(1000)
+        }
+        return fd
+    }
+
+    private func releaseStateLock(_ fd: Int32) {
+        guard fd >= 0 else { return }
+        flock(fd, LOCK_UN)
+        close(fd)
+    }
+
+    @discardableResult
+    private func mutateSharedPayload(_ change: (inout WhisperSharedStatePayload) -> Void) -> Bool {
+        let lockFD = acquireStateLock()
+        defer { releaseStateLock(lockFD) }
+        guard var payload = readFreshestPayload() else { return false }
+        change(&payload)
+        payload.updatedAt = Date().timeIntervalSince1970
+        writePayload(payload)
+        return true
+    }
+
+    /// Change `orbState` sans déclencher la sauvegarde du didSet, qui recharge l'état disque
+    /// et effacerait le texte en attente avant son écriture.
+    private func setOrbStateWithoutBroadcast(_ state: WhisperOrbState) {
+        let previous = isApplyingRemoteUpdate
+        isApplyingRemoteUpdate = true
+        orbState = state
+        isApplyingRemoteUpdate = previous
+    }
+
     private func writePayload(_ payload: WhisperSharedStatePayload) {
         guard let encoded = try? JSONEncoder().encode(payload) else { return }
         userDefaults.set(encoded, forKey: Keys.sharedPayloadData)
@@ -1001,6 +1078,9 @@ public final class AppGroupManager: ObservableObject {
     public func persistAndBroadcastState(postDarwinNotification: Bool = true, overwritePendingTextState: Bool = false) {
         let now = Date().timeIntervalSince1970
         lastAppliedTimestamp = now
+
+        let lockFD = acquireStateLock()
+        defer { releaseStateLock(lockFD) }
 
         let existing = readFreshestPayload()
         let latestToggleCount = max(
@@ -1235,9 +1315,13 @@ public final class AppGroupManager: ObservableObject {
     private func dispatchDebouncedToggleRecording() {
         guard !isKeyboardExtensionProcess else { return }
         let now = Date().timeIntervalSince1970
-        guard now - lastToggleTriggerTime > 0.45 else { return }
+        guard now - lastToggleTriggerTime > 0.2 else { return }
         lastToggleTriggerTime = now
-        onToggleRecordingRequested?()
+        if let callback = onToggleRecordingRequested {
+            callback()
+        } else {
+            hasDeferredToggle = true
+        }
     }
 
     public func requestToggleRecordingFromKeyboard() {
@@ -1250,12 +1334,9 @@ public final class AppGroupManager: ObservableObject {
         toggleRecordingRequestCount = nextCount
         lastHandledToggleRequestCount = nextCount
         userDefaults.set(nextCount, forKey: Keys.toggleRecordingRequestCount)
+        userDefaults.set(Date().timeIntervalSince1970, forKey: Keys.toggleRequestTimestamp)
 
-        if var payload = readFreshestPayload() {
-            payload.toggleRecordingRequestCount = nextCount
-            payload.updatedAt = Date().timeIntervalSince1970
-            writePayload(payload)
-        } else {
+        if !mutateSharedPayload({ $0.toggleRecordingRequestCount = nextCount }) {
             persistAndBroadcastState(postDarwinNotification: false)
         }
 
@@ -1263,17 +1344,24 @@ public final class AppGroupManager: ObservableObject {
     }
 
     public func publishTranscribedText(_ rawText: String) {
+        let isLineBreakOnly = !rawText.isEmpty && rawText.allSatisfy { $0.isNewline }
         let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-
-        let formattedText: String
-        if autoSpaceForGoodnotes && !trimmed.hasSuffix("\n") {
-            formattedText = trimmed + " "
-        } else {
-            formattedText = trimmed
+        guard isLineBreakOnly || !trimmed.isEmpty else {
+            let finishIdle: () -> Void = { [weak self] in self?.orbState = .idle }
+            if Thread.isMainThread { finishIdle() } else { DispatchQueue.main.async(execute: finishIdle) }
+            return
         }
 
-        if HardwareDetector.isRunningOnMac {
+        // Conserve les sauts de ligne dictés et l'espace français devant « : » et « ; »
+        let body = isLineBreakOnly ? rawText : (rawText.hasPrefix(" ") ? " " + trimmed : trimmed)
+        let formattedText: String
+        if autoSpaceForGoodnotes && !isLineBreakOnly {
+            formattedText = body + " "
+        } else {
+            formattedText = body
+        }
+
+        if HardwareDetector.isRunningOnMac || HardwareDetector.hasHardwareKeyboard {
             UIPasteboard.general.string = formattedText
         }
 
@@ -1282,7 +1370,7 @@ public final class AppGroupManager: ObservableObject {
             self.lastInsertedSentenceLength = formattedText.count
             self.pendingTranscribedText = formattedText
             self.pendingTextUpdatedAt = Date().timeIntervalSince1970
-            self.orbState = .idle
+            self.setOrbStateWithoutBroadcast(.idle)
             self.currentAudioLevel = 0.0
             self.userDefaults.set(Float(0.0), forKey: Keys.liveAudioLevel)
             self.persistAndBroadcastState(postDarwinNotification: true, overwritePendingTextState: true)
@@ -1299,7 +1387,7 @@ public final class AppGroupManager: ObservableObject {
         guard !pendingTranscribedText.isEmpty else { return nil }
         let now = Date().timeIntervalSince1970
         let textTimestamp = pendingTextUpdatedAt ?? readFreshestPayload()?.pendingTextUpdatedAt
-        let isFresh = textTimestamp == nil || (now - (textTimestamp ?? now)) <= 15.0
+        let isFresh = textTimestamp == nil || (now - (textTimestamp ?? now)) <= 45.0
 
         let textToInsert = isFresh ? pendingTranscribedText : nil
         isApplyingRemoteUpdate = true
@@ -1307,11 +1395,10 @@ public final class AppGroupManager: ObservableObject {
         pendingTextUpdatedAt = nil
         isApplyingRemoteUpdate = false
 
-        if var payload = readFreshestPayload() {
-            payload.pendingTranscribedText = ""
-            payload.pendingTextUpdatedAt = nil
-            payload.updatedAt = now
-            writePayload(payload)
+        if mutateSharedPayload({
+            $0.pendingTranscribedText = ""
+            $0.pendingTextUpdatedAt = nil
+        }) {
             postDarwinNotificationNamed(Self.darwinStateUpdatedNotification)
         } else {
             persistAndBroadcastState(postDarwinNotification: true, overwritePendingTextState: true)
@@ -1322,9 +1409,12 @@ public final class AppGroupManager: ObservableObject {
     public func triggerDeleteLastSentence() {
         let updateBlock = { [weak self] in
             guard let self = self else { return }
-            guard self.lastInsertedSentenceLength > 0 else { return }
+            guard self.lastInsertedSentenceLength > 0 else {
+                self.orbState = .idle
+                return
+            }
             self.shouldDeleteLastSentence = true
-            self.orbState = .idle
+            self.setOrbStateWithoutBroadcast(.idle)
             self.persistAndBroadcastState(postDarwinNotification: true, overwritePendingTextState: true)
         }
 
@@ -1343,11 +1433,10 @@ public final class AppGroupManager: ObservableObject {
         lastInsertedSentenceLength = 0
         isApplyingRemoteUpdate = false
 
-        if var payload = readFreshestPayload() {
-            payload.shouldDeleteLastSentence = false
-            payload.lastInsertedSentenceLength = 0
-            payload.updatedAt = Date().timeIntervalSince1970
-            writePayload(payload)
+        if mutateSharedPayload({
+            $0.shouldDeleteLastSentence = false
+            $0.lastInsertedSentenceLength = 0
+        }) {
             postDarwinNotificationNamed(Self.darwinStateUpdatedNotification)
         } else {
             persistAndBroadcastState(postDarwinNotification: true, overwritePendingTextState: true)
@@ -1362,11 +1451,10 @@ public final class AppGroupManager: ObservableObject {
         shouldDeleteLastSentence = false
         isApplyingRemoteUpdate = false
 
-        if var payload = readFreshestPayload() {
-            payload.lastInsertedSentenceLength = 0
-            payload.shouldDeleteLastSentence = false
-            payload.updatedAt = Date().timeIntervalSince1970
-            writePayload(payload)
+        if mutateSharedPayload({
+            $0.lastInsertedSentenceLength = 0
+            $0.shouldDeleteLastSentence = false
+        }) {
             postDarwinNotificationNamed(Self.darwinStateUpdatedNotification)
         }
     }
@@ -1447,7 +1535,7 @@ public final class AppGroupManager: ObservableObject {
 
     public func startFastPolling() {
         pollingTimer?.invalidate()
-        let timer = Timer(timeInterval: 0.45, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.reloadStateFromChannels()
         }
         RunLoop.main.add(timer, forMode: .common)

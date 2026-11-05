@@ -2,7 +2,7 @@ name: WhisperOrb
 options:
   bundleIdPrefix: com.bluewolfy24yt
   deploymentTarget:
-    iOS: "16.0"
+    iOS: "16.4"
   xcodeVersion: "16.0"
   generateEmptyDirectories: true
 
@@ -10,7 +10,7 @@ targets:
   WhisperOrbApp:
     type: application
     platform: iOS
-    deploymentTarget: "16.0"
+    deploymentTarget: "16.4"
     sources:
       - path: WhisperOrbApp
         excludes:
@@ -37,7 +37,7 @@ targets:
   WhisperKeyboard:
     type: app-extension
     platform: iOS
-    deploymentTarget: "16.0"
+    deploymentTarget: "16.4"
     sources:
       - path: WhisperKeyboard
         excludes:

@@ -114,6 +114,7 @@ public final class UserStyleMemoryManager: ObservableObject {
 
     private let sharedDefaults: UserDefaults
     private var isReloadingFromDisk = false
+    private var lastLoadedModificationDate: Date?
 
     private static var resolvedContainerURL: URL {
         if let groupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: AppGroupManager.appGroupIdentifier) {
@@ -136,7 +137,8 @@ public final class UserStyleMemoryManager: ObservableObject {
         } else if UserDefaults.standard.object(forKey: Self.enabledKey) != nil {
             initialEnabled = UserDefaults.standard.bool(forKey: Self.enabledKey)
         } else {
-            initialEnabled = true
+            // Désactivé par défaut : « beaucoup » ne doit pas devenir « bcp » sans demande explicite
+            initialEnabled = false
         }
         self.isMemoryEnabled = initialEnabled
 
@@ -168,6 +170,14 @@ public final class UserStyleMemoryManager: ObservableObject {
     }
 
     public func reloadFromDisk() {
+        // Appelé à chaque rafraîchissement : on ne relit le JSON que s'il a changé
+        let attributes = try? FileManager.default.attributesOfItem(atPath: memoryFileURL.path)
+        let modificationDate = attributes?[.modificationDate] as? Date
+        if let modificationDate = modificationDate, modificationDate == lastLoadedModificationDate {
+            return
+        }
+        lastLoadedModificationDate = modificationDate
+
         guard let data = try? Data(contentsOf: memoryFileURL),
               let decoded = try? JSONDecoder().decode(UserStyleMemoryPayload.self, from: data) else {
             return
@@ -257,7 +267,7 @@ public final class UserStyleMemoryManager: ObservableObject {
             return source
         }
         let range = NSRange(source.startIndex..<source.endIndex, in: source)
-        return regex.stringByReplacingMatches(in: source, options: [], range: range, withTemplate: replacement)
+        return regex.stringByReplacingMatches(in: source, options: [], range: range, withTemplate: NSRegularExpression.escapedTemplate(for: replacement))
     }
 
     // MARK: - Édition des Abréviations & Habitudes par Langue

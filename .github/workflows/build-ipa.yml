@@ -52,6 +52,7 @@ jobs:
           if-no-files-found: error
 
       - name: 7. Publish Android APK to GitHub Release v2.2.1
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v2.2.1
@@ -94,10 +95,12 @@ jobs:
           unzip -q -o /tmp/whisper-xcf.zip -d /tmp/
           rm -rf Frameworks/whisper.xcframework
           mv /tmp/build-apple/whisper.xcframework Frameworks/whisper.xcframework
-          plutil -replace MinimumOSVersion -string "16.0" Frameworks/whisper.xcframework/ios-arm64/whisper.framework/Info.plist
 
       - name: 4. Generate Xcode Project via XcodeGen
-        run: xcodegen generate
+        run: |
+          plutil -replace CFBundleVersion -string "$GITHUB_RUN_NUMBER" WhisperOrbApp/Info.plist
+          plutil -replace CFBundleVersion -string "$GITHUB_RUN_NUMBER" WhisperKeyboard/Info.plist
+          xcodegen generate
 
       - name: 5. Build Release for iphoneos (Unsigned / Ad-Hoc)
         run: |
@@ -133,6 +136,7 @@ jobs:
           if-no-files-found: error
 
       - name: 8. Publish Apple IPA to GitHub Release v2.2.1
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v2.2.1

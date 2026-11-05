@@ -34,15 +34,10 @@
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>WhisperOrb utilise le microphone uniquement en local (100 % hors-ligne sur votre appareil) pour transcrire votre voix en texte instantanément.</string>
-    <key>BGTaskSchedulerPermittedIdentifiers</key>
-    <array>
-        <string>com.bluewolfy24yt.whisperorb.processing</string>
-    </array>
+    <string>WhisperOrb transcrit votre voix localement, 100 % hors-ligne. Le micro reste ouvert en arrière-plan tant que le moteur vocal est activé, afin de pouvoir dicter depuis le clavier. Rien n'est enregistré ni analysé avant que vous lanciez une dictée.</string>
     <key>UIBackgroundModes</key>
     <array>
         <string>audio</string>
-        <string>processing</string>
     </array>
     <key>UIApplicationSceneManifest</key>
     <dict>

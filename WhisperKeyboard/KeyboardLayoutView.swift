@@ -1,5 +1,73 @@
 import SwiftUI
 import UIKit
+import AudioToolbox
+
+public struct KeyboardFieldTraits: Equatable {
+    public var keyboardType: UIKeyboardType = .default
+    public var returnKeyType: UIReturnKeyType = .default
+    public var allowsAutocorrection: Bool = true
+    public var allowsAutocapitalization: Bool = true
+
+    public init(
+        keyboardType: UIKeyboardType = .default,
+        returnKeyType: UIReturnKeyType = .default,
+        allowsAutocorrection: Bool = true,
+        allowsAutocapitalization: Bool = true
+    ) {
+        self.keyboardType = keyboardType
+        self.returnKeyType = returnKeyType
+        self.allowsAutocorrection = allowsAutocorrection
+        self.allowsAutocapitalization = allowsAutocapitalization
+    }
+
+    var isNumericField: Bool {
+        switch keyboardType {
+        case .numberPad, .decimalPad, .phonePad, .asciiCapableNumberPad, .numbersAndPunctuation:
+            return true
+        default:
+            return false
+        }
+    }
+
+    var allowsAutoReplace: Bool {
+        guard allowsAutocorrection else { return false }
+        switch keyboardType {
+        case .URL, .emailAddress, .webSearch:
+            return false
+        default:
+            return true
+        }
+    }
+}
+
+/// Chaque touche a son propre état de geste : un état partagé annulerait la touche
+/// voisine pendant la frappe à deux mains.
+private struct KeyTouchGesture: ViewModifier {
+    @GestureState private var isTouchActive = false
+
+    let onChanged: (DragGesture.Value) -> Void
+    let onEnded: () -> Void
+    let onCancelled: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .updating($isTouchActive) { _, state, _ in
+                        state = true
+                    }
+                    .onChanged(onChanged)
+                    .onEnded { _ in
+                        onEnded()
+                    }
+            )
+            .onChange(of: isTouchActive) { active in
+                if !active {
+                    onCancelled()
+                }
+            }
+    }
+}
 
 public enum KeyboardLayer: Equatable {
     case letters
@@ -176,7 +244,10 @@ public struct KeyboardLayoutView: View {
     public let onDeleteLastDictatedSentence: (Int) -> Void
     public let onAdvanceToNextKeyboard: () -> Void
     public let onOpenParentApp: () -> Void
+    public let onDismissKeyboard: () -> Void
     public let contextBeforeCursorProvider: () -> String
+    public let fieldTraitsProvider: () -> KeyboardFieldTraits
+    public let hasFullAccessProvider: () -> Bool
 
     @State private var currentLayer: KeyboardLayer = .letters
     @State private var selectedEmojiCategory: AppleEmojiCategory = .smileys
@@ -187,6 +258,8 @@ public struct KeyboardLayoutView: View {
     @State private var showQuickOrbPopover: Bool = false
     @State private var localTypedContextBuffer: String = ""
     @State private var currentSuggestionSet: AutocorrectSuggestionSet = .empty
+    @State private var containerWidth: CGFloat = 0
+    @State private var fieldTraits = KeyboardFieldTraits()
 
     // État temps réel de la touche pressée (Loupe Apple + Appui long variantes/accents)
     @State private var pressedKeyID: String? = nil
@@ -194,7 +267,6 @@ public struct KeyboardLayoutView: View {
     @State private var activeVariants: [String] = []
     @State private var selectedVariantIndex: Int = 0
     @State private var longPressTimer: Timer? = nil
-    @GestureState private var isCharacterKeyTouchActive: Bool = false
 
     // Répétition automatique de la touche ⌫ Suppr (protégée contre l'annulation système du toucher)
     @State private var isHoldingBackspace: Bool = false
@@ -228,7 +300,8 @@ public struct KeyboardLayoutView: View {
     ]
 
     private var isAZERTYLayout: Bool {
-        appGroup.selectedLanguage.effectiveStyleLanguageCode == "fr"
+        // Suit la langue de l'appareil : dicter en anglais ne doit pas déplacer les touches
+        WhisperLanguageSelection.detectedSystemISOCode == "fr"
     }
 
     private let row1Numbers: [String] = [
@@ -299,10 +372,12 @@ public struct KeyboardLayoutView: View {
             return []
         }
 
+        // La lettre de base reste en tête : relâcher sans glisser garde « e », pas « é »
+        let withBase = [base] + list
         if currentLayer == .letters && shiftState != .lowercased {
-            return list.map { $0.uppercased() }
+            return withBase.map { $0.uppercased() }
         }
-        return list
+        return withBase
     }
 
     public init(
@@ -311,18 +386,25 @@ public struct KeyboardLayoutView: View {
         onDeleteLastDictatedSentence: @escaping (Int) -> Void,
         onAdvanceToNextKeyboard: @escaping () -> Void,
         onOpenParentApp: @escaping () -> Void = {},
-        contextBeforeCursorProvider: @escaping () -> String = { "" }
+        onDismissKeyboard: @escaping () -> Void = {},
+        contextBeforeCursorProvider: @escaping () -> String = { "" },
+        fieldTraitsProvider: @escaping () -> KeyboardFieldTraits = { KeyboardFieldTraits() },
+        hasFullAccessProvider: @escaping () -> Bool = { true }
     ) {
         self.onInsertText = onInsertText
         self.onDeleteBackward = onDeleteBackward
         self.onDeleteLastDictatedSentence = onDeleteLastDictatedSentence
         self.onAdvanceToNextKeyboard = onAdvanceToNextKeyboard
         self.onOpenParentApp = onOpenParentApp
+        self.onDismissKeyboard = onDismissKeyboard
         self.contextBeforeCursorProvider = contextBeforeCursorProvider
+        self.fieldTraitsProvider = fieldTraitsProvider
+        self.hasFullAccessProvider = hasFullAccessProvider
     }
 
+    // Disposition « grand écran » seulement si le clavier est réellement large
     private var isIPad: Bool {
-        UIDevice.current.userInterfaceIdiom == .pad
+        UIDevice.current.userInterfaceIdiom == .pad && (containerWidth == 0 || containerWidth >= 500)
     }
 
     public var body: some View {
@@ -365,6 +447,15 @@ public struct KeyboardLayoutView: View {
                 .padding(.bottom, isIPad ? 6 : 3)
             }
         }
+        .background(
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { containerWidth = proxy.size.width }
+                    .onChange(of: proxy.size.width) { newWidth in
+                        containerWidth = newWidth
+                    }
+            }
+        )
         .onAppear {
             syncContextFromDocumentProxy(force: true)
         }
@@ -375,11 +466,6 @@ public struct KeyboardLayoutView: View {
         .onChange(of: isBackspaceTouchActive) { active in
             if !active && isHoldingBackspace {
                 stopBackspaceRepeat()
-            }
-        }
-        .onChange(of: isCharacterKeyTouchActive) { active in
-            if !active && pressedKeyID != nil {
-                cancelKeyPress()
             }
         }
         .onChange(of: appGroup.selectedLanguage) { _ in
@@ -449,10 +535,12 @@ public struct KeyboardLayoutView: View {
                     ForEach(Array(activeEmojiList.enumerated()), id: \.offset) { _, emoji in
                         Button(action: {
                             triggerLightHaptic()
+                            appGroup.clearLastInsertedSentenceLength()
                             onInsertText(emoji)
                             localTypedContextBuffer += emoji
                             lastLocalEditTime = Date()
                             appGroup.recordUsedEmoji(emoji)
+                            refreshAutocorrectSuggestions(preferLocalBuffer: true)
                         }) {
                             Text(emoji)
                                 .font(.system(size: isIPad ? 30 : 27))
@@ -485,22 +573,27 @@ public struct KeyboardLayoutView: View {
 
                 Spacer(minLength: 2)
 
-                ForEach(AppleEmojiCategory.allCases) { category in
-                    let isSelected = (selectedEmojiCategory == category)
-                    Button(action: {
-                        triggerLightHaptic()
-                        selectedEmojiCategory = category
-                    }) {
-                        Image(systemName: category.sfSymbolIcon)
-                            .font(.system(size: isIPad ? 14 : 13, weight: .medium))
-                            .foregroundColor(isSelected ? .white : Color.white.opacity(0.45))
-                            .frame(width: isIPad ? 34 : 27, height: 30)
-                            .background(
-                                Circle()
-                                    .fill(isSelected ? Color(hex: "#3A3A3C") : Color.clear)
-                            )
+                // Défilable : en clavier étroit, « ABC » et « ⌫ » restent toujours accessibles
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: isIPad ? 6 : 2) {
+                        ForEach(AppleEmojiCategory.allCases) { category in
+                            let isSelected = (selectedEmojiCategory == category)
+                            Button(action: {
+                                triggerLightHaptic()
+                                selectedEmojiCategory = category
+                            }) {
+                                Image(systemName: category.sfSymbolIcon)
+                                    .font(.system(size: isIPad ? 14 : 13, weight: .medium))
+                                    .foregroundColor(isSelected ? .white : Color.white.opacity(0.45))
+                                    .frame(width: isIPad ? 34 : 27, height: 30)
+                                    .background(
+                                        Circle()
+                                            .fill(isSelected ? Color(hex: "#3A3A3C") : Color.clear)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
-                    .buttonStyle(.plain)
                 }
 
                 Spacer(minLength: 2)
@@ -544,7 +637,7 @@ public struct KeyboardLayoutView: View {
                 }
             }) {
                 HStack(spacing: 4) {
-                    Image(systemName: "keyboard.chevron.compact.up")
+                    Image(systemName: "keyboard")
                         .font(.system(size: isIPad ? 14 : 13, weight: .semibold))
                     Text("Clavier")
                         .font(.system(size: isIPad ? 13 : 12, weight: .semibold))
@@ -796,6 +889,11 @@ public struct KeyboardLayoutView: View {
     private func handleVoiceDictationTrigger() {
         let generator = UIImpactFeedbackGenerator(style: .medium)
         generator.impactOccurred()
+        // Sans accès complet, le clavier ne peut pas joindre l'app : on y envoie l'utilisateur
+        guard hasFullAccessProvider() else {
+            onOpenParentApp()
+            return
+        }
         appGroup.reloadStateFromChannels()
         appGroup.requestToggleRecordingFromKeyboard()
         if !appGroup.isBackgroundEngineActive {
@@ -804,6 +902,9 @@ public struct KeyboardLayoutView: View {
     }
 
     private var collapsedStatusTitle: String {
+        if !hasFullAccessProvider() {
+            return "Activez l'accès complet"
+        }
         if !appGroup.isBackgroundEngineActive && appGroup.orbState == .idle {
             return "Ouvrir WhisperOrb (Micro)"
         }
@@ -818,6 +919,9 @@ public struct KeyboardLayoutView: View {
     }
 
     private var liveStatusTitle: String {
+        if !hasFullAccessProvider() {
+            return isIPad ? "Activez l'accès complet dans Réglages" : "Accès complet requis"
+        }
         if !appGroup.isBackgroundEngineActive && appGroup.orbState == .idle {
             return isIPad ? "Activez le micro dans WhisperOrb" : "Micro veille"
         }
@@ -945,18 +1049,32 @@ public struct KeyboardLayoutView: View {
     }
 
     private func syncContextFromDocumentProxy(force: Bool) {
+        let traits = fieldTraitsProvider()
+        let fieldChanged = traits != fieldTraits
+        if force || fieldChanged {
+            fieldTraits = traits
+            if traits.isNumericField {
+                currentLayer = .numbers
+            } else if currentLayer == .numbers {
+                currentLayer = .letters
+            }
+        }
+
         let proxyContext = contextBeforeCursorProvider()
         if force || Date().timeIntervalSince(lastLocalEditTime) > 0.25 || localTypedContextBuffer.isEmpty {
             localTypedContextBuffer = proxyContext
         }
-        updateAutoShiftForContext(localTypedContextBuffer)
+        updateAutoShiftForContext(localTypedContextBuffer, allowLowering: force || fieldChanged)
         refreshAutocorrectSuggestions(preferLocalBuffer: true)
     }
 
-    private func updateAutoShiftForContext(_ context: String) {
+    private func updateAutoShiftForContext(_ context: String, allowLowering: Bool) {
         guard shiftState != .capsLocked else { return }
-        if context.isEmpty || context.hasSuffix("\n") || context.hasSuffix(". ") || context.hasSuffix("! ") || context.hasSuffix("? ") {
+        let isSentenceStart = context.isEmpty || context.hasSuffix("\n") || context.hasSuffix(". ") || context.hasSuffix("! ") || context.hasSuffix("? ")
+        if fieldTraits.allowsAutocapitalization && isSentenceStart {
             shiftState = .uppercased
+        } else if allowLowering {
+            shiftState = .lowercased
         }
     }
 
@@ -1015,7 +1133,7 @@ public struct KeyboardLayoutView: View {
                     HStack(spacing: 6) {
                         ForEach(WhisperModelTier.allCases) { tier in
                             let isUnlocked = HardwareDetector.isTierUnlocked(tier, simulate4GB: appGroup.simulateModest4GBDevice, forceUnlock: appGroup.forceUnlockAllModels)
-                            let isDownloaded = appGroup.downloadedModelRaws.isEmpty || appGroup.downloadedModelRaws.contains(tier.rawValue)
+                            let isDownloaded = appGroup.downloadedModelRaws.contains(tier.rawValue)
                             let isSelected = (appGroup.selectedModel == tier)
                             Button(action: {
                                 guard isUnlocked else { return }
@@ -1229,29 +1347,31 @@ public struct KeyboardLayoutView: View {
             }
             .zIndex(isThisKeyPressed ? 100 : 1)
             .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .updating($isCharacterKeyTouchActive) { _, state, _ in
-                        state = true
-                    }
-                    .onChanged { value in
-                        if pressedKeyID != key {
-                            beginKeyPress(key)
-                        } else if isShowingLongPressVariants && !activeVariants.isEmpty {
-                            let stepWidth: CGFloat = isIPad ? 34.0 : 28.0
-                            let deltaSteps = Int(round(value.translation.width / stepWidth))
-                            let newIdx = max(0, min(activeVariants.count - 1, deltaSteps))
-                            if newIdx != selectedVariantIndex {
-                                selectedVariantIndex = newIdx
-                                let selectionFeedback = UISelectionFeedbackGenerator()
-                                selectionFeedback.selectionChanged()
-                            }
+            .modifier(KeyTouchGesture(
+                onChanged: { value in
+                    if pressedKeyID != key {
+                        beginKeyPress(key)
+                    } else if isShowingLongPressVariants && !activeVariants.isEmpty {
+                        // Pas = largeur d'une variante + espacement du callout
+                        let stepWidth: CGFloat = isIPad ? 38.0 : 33.0
+                        let deltaSteps = Int(round(value.translation.width / stepWidth))
+                        let newIdx = max(0, min(activeVariants.count - 1, deltaSteps))
+                        if newIdx != selectedVariantIndex {
+                            selectedVariantIndex = newIdx
+                            let selectionFeedback = UISelectionFeedbackGenerator()
+                            selectionFeedback.selectionChanged()
                         }
                     }
-                    .onEnded { _ in
-                        endKeyPress(key)
+                },
+                onEnded: {
+                    endKeyPress(key)
+                },
+                onCancelled: {
+                    if pressedKeyID == key {
+                        cancelKeyPress()
                     }
-            )
+                }
+            ))
     }
 
     private func appleSingleKeyMagnifierCallout(label: String) -> some View {
@@ -1332,7 +1452,7 @@ public struct KeyboardLayoutView: View {
 
         guard !candidates.isEmpty else { return }
 
-        let timer = Timer(timeInterval: 0.24, repeats: false) { _ in
+        let timer = Timer(timeInterval: 0.4, repeats: false) { _ in
             if pressedKeyID == key {
                 isShowingLongPressVariants = true
                 selectedVariantIndex = 0
@@ -1354,21 +1474,27 @@ public struct KeyboardLayoutView: View {
     }
 
     private func endKeyPress(_ key: String) {
-        longPressTimer?.invalidate()
-        longPressTimer = nil
+        // Frappe à deux mains : une autre touche peut déjà être la touche active
+        let isActiveKey = (pressedKeyID == key)
+        if isActiveKey {
+            longPressTimer?.invalidate()
+            longPressTimer = nil
+        }
 
         let textToInsert: String
-        if isShowingLongPressVariants && !activeVariants.isEmpty {
+        if isActiveKey && isShowingLongPressVariants && !activeVariants.isEmpty {
             let safeIdx = max(0, min(activeVariants.count - 1, selectedVariantIndex))
             textToInsert = activeVariants[safeIdx]
         } else {
             textToInsert = displayStringForKey(key)
         }
 
-        pressedKeyID = nil
-        isShowingLongPressVariants = false
-        activeVariants = []
-        selectedVariantIndex = 0
+        if isActiveKey {
+            pressedKeyID = nil
+            isShowingLongPressVariants = false
+            activeVariants = []
+            selectedVariantIndex = 0
+        }
 
         appGroup.clearLastInsertedSentenceLength()
         onInsertText(textToInsert)
@@ -1469,7 +1595,7 @@ public struct KeyboardLayoutView: View {
                 }
                 refreshAutocorrectSuggestions(preferLocalBuffer: true)
             }) {
-                Text(isAZERTYLayout ? "retour" : "return")
+                Text(returnKeyLabel)
                     .font(.system(size: isIPad ? 16 : 15, weight: .regular))
                     .foregroundColor(.white)
                     .frame(width: isIPad ? 96 : 80, height: isIPad ? 45 : 42)
@@ -1480,6 +1606,43 @@ public struct KeyboardLayoutView: View {
                     )
             }
             .buttonStyle(.plain)
+
+            // Touche de masquage : indispensable sur iPad, où rien d'autre ne ferme le clavier
+            if isIPad {
+                Button(action: {
+                    triggerLightHaptic()
+                    onDismissKeyboard()
+                }) {
+                    Image(systemName: "keyboard.chevron.compact.down")
+                        .font(.system(size: 17, weight: .regular))
+                        .foregroundColor(.white)
+                        .frame(width: 58, height: 45)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5.0, style: .continuous)
+                                .fill(Color(hex: "#48484A"))
+                                .shadow(color: Color.black.opacity(0.45), radius: 0.4, x: 0, y: 1.0)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var returnKeyLabel: String {
+        let isFrench = isAZERTYLayout
+        switch fieldTraits.returnKeyType {
+        case .search, .google, .yahoo:
+            return isFrench ? "chercher" : "search"
+        case .go, .route, .join:
+            return isFrench ? "aller" : "go"
+        case .send:
+            return isFrench ? "envoyer" : "send"
+        case .done:
+            return isFrench ? "OK" : "done"
+        case .next, .continue:
+            return isFrench ? "suivant" : "next"
+        default:
+            return isFrench ? "retour" : "return"
         }
     }
 
@@ -1552,7 +1715,7 @@ public struct KeyboardLayoutView: View {
             // Application automatique sur Espace UNIQUEMENT pour les corrections évidentes d'apostrophe/accent
             // (ex: "jarrive" -> "j'arrive ", "cest" -> "c'est ", "l'ecole" -> "l'école ")
             let s = currentSuggestionSet
-            if appGroup.isSmartAutocorrectEnabled && s.shouldAutoReplaceOnSpace && !s.typedWord.isEmpty {
+            if appGroup.isSmartAutocorrectEnabled && fieldTraits.allowsAutoReplace && s.shouldAutoReplaceOnSpace && !s.typedWord.isEmpty {
                 applySuggestionCandidate(s.primaryCorrection, replaceCount: s.typedWord.count)
             } else {
                 onInsertText(" ")
@@ -1578,7 +1741,8 @@ public struct KeyboardLayoutView: View {
         refreshAutocorrectSuggestions(preferLocalBuffer: true)
 
         backspaceRepeatTimer?.invalidate()
-        let timer = Timer(timeInterval: 0.075, repeats: true) { _ in
+        // Délai initial : un appui normal n'efface qu'un seul caractère
+        let timer = Timer(fire: Date().addingTimeInterval(0.4), interval: 0.075, repeats: true) { _ in
             guard isHoldingBackspace else {
                 stopBackspaceRepeat()
                 return
@@ -1617,5 +1781,9 @@ public struct KeyboardLayoutView: View {
     private func triggerLightHaptic() {
         let generator = UIImpactFeedbackGenerator(style: .light)
         generator.impactOccurred()
+        // Les iPad n'ont pas de moteur haptique : le clic sonore est le seul retour de frappe
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            AudioServicesPlaySystemSound(1104)
+        }
     }
 }

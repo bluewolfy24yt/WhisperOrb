@@ -12,24 +12,40 @@ public final class ModelDownloader: NSObject, ObservableObject, URLSessionDownlo
     private var downloadTasks: [WhisperModelTier: URLSessionDownloadTask] = [:]
     private var taskToTierMap: [Int: WhisperModelTier] = [:]
     private lazy var urlSession: URLSession = {
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 60
-        config.timeoutIntervalForResource = 3600
-        config.waitsForConnectivity = true
+        // Session d'arrière-plan : le téléchargement continue quand l'utilisateur quitte l'app
+        let config = URLSessionConfiguration.background(withIdentifier: "com.bluewolfy24yt.whisperorb.models")
+        config.isDiscretionary = false
+        config.sessionSendsLaunchEvents = true
+        config.timeoutIntervalForResource = 24 * 3600
         return URLSession(configuration: config, delegate: self, delegateQueue: .main)
     }()
 
     public override init() {
         super.init()
         refreshDownloadedModels()
+        // Reprend le suivi des téléchargements poursuivis par le système pendant l'absence de l'app
+        urlSession.getAllTasks { tasks in
+            DispatchQueue.main.async {
+                for case let task as URLSessionDownloadTask in tasks {
+                    guard let tier = self.tier(for: task) else { continue }
+                    self.activeDownloads.insert(tier)
+                    self.downloadTasks[tier] = task
+                    self.taskToTierMap[task.taskIdentifier] = tier
+                }
+            }
+        }
+    }
+
+    private func tier(for task: URLSessionTask) -> WhisperModelTier? {
+        if let known = taskToTierMap[task.taskIdentifier] { return known }
+        let fileName = task.originalRequest?.url?.lastPathComponent
+        return WhisperModelTier.allCases.first { $0.fileName == fileName }
     }
 
     // MARK: - Chemins Locaux & Protection Hors-Ligne (Exclusion Backup iCloud / Purge iPadOS)
 
     public var modelsDirectoryURL: URL {
-        let dir = AppGroupManager.shared.modelsDirectoryURL
-        excludeFromBackup(url: dir)
-        return dir
+        AppGroupManager.shared.modelsDirectoryURL
     }
 
     public func localModelURL(for tier: WhisperModelTier) -> URL {
@@ -95,6 +111,14 @@ public final class ModelDownloader: NSObject, ObservableObject, URLSessionDownlo
     public func downloadModel(_ tier: WhisperModelTier) {
         guard !activeDownloads.contains(tier) else { return }
 
+        // Le fichier temporaire et sa copie finale ont besoin d'une marge
+        let values = try? modelsDirectoryURL.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+        if let available = values?.volumeAvailableCapacityForImportantUsage,
+           available < Int64(tier.sizeMB) * 1024 * 1024 * 12 / 10 {
+            errorMessage = "Espace insuffisant pour \(tier.displayName) (\(tier.sizeMB) Mo requis)."
+            return
+        }
+
         errorMessage = nil
         downloadProgress[tier] = 0.0
         activeDownloads.insert(tier)
@@ -140,7 +164,7 @@ public final class ModelDownloader: NSObject, ObservableObject, URLSessionDownlo
         totalBytesWritten: Int64,
         totalBytesExpectedToWrite: Int64
     ) {
-        guard let tier = taskToTierMap[downloadTask.taskIdentifier] else { return }
+        guard let tier = tier(for: downloadTask) else { return }
 
         let expectedBytes: Double
         if totalBytesExpectedToWrite > 0 {
@@ -160,7 +184,7 @@ public final class ModelDownloader: NSObject, ObservableObject, URLSessionDownlo
         downloadTask: URLSessionDownloadTask,
         didFinishDownloadingTo location: URL
     ) {
-        guard let tier = taskToTierMap[downloadTask.taskIdentifier] else { return }
+        guard let tier = tier(for: downloadTask) else { return }
 
         if let httpResponse = downloadTask.response as? HTTPURLResponse,
            !(200...299).contains(httpResponse.statusCode) {
@@ -177,6 +201,12 @@ public final class ModelDownloader: NSObject, ObservableObject, URLSessionDownlo
         let destinationURL = localModelURL(for: tier)
 
         do {
+            let expectedSize = downloadTask.countOfBytesExpectedToReceive
+            let receivedSize = (try? FileManager.default.attributesOfItem(atPath: location.path))?[.size] as? Int64
+            if expectedSize > 0, let receivedSize = receivedSize, receivedSize != expectedSize {
+                throw NSError(domain: "WhisperOrb", code: 1, userInfo: [NSLocalizedDescriptionKey: "fichier incomplet"])
+            }
+
             let parentDir = destinationURL.deletingLastPathComponent()
             if !FileManager.default.fileExists(atPath: parentDir.path) {
                 try FileManager.default.createDirectory(at: parentDir, withIntermediateDirectories: true)
@@ -223,7 +253,7 @@ public final class ModelDownloader: NSObject, ObservableObject, URLSessionDownlo
         let nsError = error as NSError
         guard nsError.code != NSURLErrorCancelled else { return }
 
-        guard let tier = taskToTierMap[task.taskIdentifier] else { return }
+        guard let tier = tier(for: task) else { return }
 
         DispatchQueue.main.async {
             self.errorMessage = "Échec du téléchargement (\(tier.displayName)) : \(error.localizedDescription)"

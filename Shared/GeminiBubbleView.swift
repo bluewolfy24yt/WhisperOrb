@@ -70,7 +70,9 @@ public struct GeminiBubbleView: View {
     }
 
     public var body: some View {
-        let isPaused = (scenePhase == .background || scenePhase == .inactive)
+        // scenePhase n'est pas fiable dans le UIHostingController du clavier
+        let isKeyboardExtension = Bundle.main.bundlePath.hasSuffix(".appex")
+        let isPaused = !isKeyboardExtension && (scenePhase == .background || scenePhase == .inactive)
         let animatedOrb = TimelineView(.animation(minimumInterval: targetFrameInterval, paused: isPaused)) { timeline in
             let phase = timeline.date.timeIntervalSinceReferenceDate
             let effectiveLevel = computeEffectiveLevel(phase: phase)

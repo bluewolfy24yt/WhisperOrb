@@ -54,8 +54,7 @@ public final class SmartAutocorrectEngine {
             "nest": "n'est",
             "netait": "n'était",
             "nai": "n'ai",
-            "nas": "n'as",
-            "na": "n'a",
+
             "quon": "qu'on",
             "quil": "qu'il",
             "quils": "qu'ils",
@@ -163,7 +162,6 @@ public final class SmartAutocorrectEngine {
             "wouldnt": "wouldn't",
             "thats": "that's",
             "whats": "what's",
-            "lets": "let's",
             "heres": "here's",
             "theres": "there's",
             "wheres": "where's",
@@ -222,7 +220,6 @@ public final class SmartAutocorrectEngine {
             "voce": "você",
             "tambem": "também",
             "entao": "então",
-            "ja": "já",
             "obrigatorio": "obrigatório",
             "informacao": "informação"
         ]

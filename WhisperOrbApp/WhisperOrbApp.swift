@@ -42,10 +42,12 @@ struct WhisperOrbApp: App {
                         }
                     }
                 }
+                // Sans ceci, chaque whisperorb:// peut ouvrir une nouvelle fenêtre sur iPad
+                .handlesExternalEvents(preferring: Set(["*"]), allowing: Set(["*"]))
                 .onOpenURL { _ in
                     appGroup.reloadStateFromChannels()
                     modelDownloader.refreshDownloadedModels()
-                    if !whisperEngine.isBackgroundEngineRunning {
+                    if !whisperEngine.isAudioEngineAlive {
                         whisperEngine.startBackgroundAudioEngine()
                     }
                 }
@@ -55,11 +57,15 @@ struct WhisperOrbApp: App {
             case .active:
                 appGroup.reloadStateFromChannels()
                 modelDownloader.refreshDownloadedModels()
-                if !whisperEngine.isBackgroundEngineRunning && !modelDownloader.downloadedModels.isEmpty {
+                if !whisperEngine.isAudioEngineAlive && !modelDownloader.downloadedModels.isEmpty {
                     whisperEngine.startBackgroundAudioEngine()
                 }
-            case .inactive, .background:
+                whisperEngine.prepareInferenceBackend(forBackground: false)
+            case .inactive:
                 appGroup.persistAndBroadcastState(postDarwinNotification: true)
+            case .background:
+                appGroup.persistAndBroadcastState(postDarwinNotification: true)
+                whisperEngine.prepareInferenceBackend(forBackground: true)
             @unknown default:
                 break
             }

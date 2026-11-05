@@ -75,9 +75,9 @@
 | **2. ⚡ Whisper Flash** | `ggml-base-q5_1.bin` | 60 MB | ~190 MB | **3 GB+** | Instant everyday messaging |
 | **3. ⚖️ Whisper PRO** | `ggml-small-q5_1.bin` | 190 MB | ~380 MB | **4 GB+** | Balanced daily dictation (Default on 4 GB phones) |
 | **4. 🔥 Whisper Medium** | `ggml-medium-q5_0.bin` | 539 MB | ~900 MB | **4 GB+** | High-accuracy multilingual dictation |
-| **5. 🚀 Whisper Expert (v3 Turbo Q5)** | `ggml-large-v3-turbo-q5_0.bin` | 540 MB | ~950 MB | **4 GB+** | Near-Large-v3 accuracy at high speed |
+| **5. 🚀 Whisper Expert (v3 Turbo Q5)** | `ggml-large-v3-turbo-q5_0.bin` | 548 MB | ~950 MB | **4 GB+** | Near-Large-v3 accuracy at high speed |
 | **6. 💎 Whisper Expert+ (v3 Turbo Q8)** | `ggml-large-v3-turbo-q8_0.bin` | 874 MB | ~1.32 GB | **8 GB+** | 8-bit studio fidelity |
-| **7. 👑 Whisper TITAN (Large-v3 Full)** | `ggml-large-v3-q5_0.bin` | **1.08 GB** | ~2.15 GB | **12 GB+** | **Full 1.55B parameter master model** (Pixel 9 Pro XL 16 GB, Googlebook 14, iPad Pro M4/M5, Mac) |
+| **7. 👑 Whisper TITAN (Large-v3 Full)** | `ggml-large-v3-q5_0.bin` | **1.08 GB** | ~2.15 GB | **12 GB+** | **Full 1.55B parameter master model** (Pixel 9 Pro XL 16 GB, Googlebook 14, iPad Pro with 12 GB+ RAM, Mac) |
 
 ---
 

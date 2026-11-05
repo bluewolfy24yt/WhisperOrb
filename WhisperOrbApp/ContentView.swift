@@ -22,7 +22,9 @@ public struct ContentView: View {
     @State private var easterEggStepIndex: Int? = nil
 
     private let githubRepoURLString = "https://github.com/bluewolfy24yt/WhisperOrb"
-    private let githubReleasesURLString = "https://github.com/bluewolfy24yt/WhisperOrb/releases/latest"
+    private static let githubReleasesURLString = "https://github.com/bluewolfy24yt/WhisperOrb/releases/latest"
+    // Généré une seule fois : le body est réévalué plusieurs fois par seconde pendant la dictée
+    private static let releasesQRCode: UIImage? = generateHighContrastQRCode(from: githubReleasesURLString)
 
     public init() {}
 
@@ -381,16 +383,20 @@ public struct ContentView: View {
                     Spacer()
 
                     if whisperEngine.lastTranscriptionLatencyMs > 0 {
-                        Text("\(whisperEngine.lastTranscriptionLatencyMs) ms • GPU Metal")
+                        Text("\(whisperEngine.lastTranscriptionLatencyMs) ms • \(whisperEngine.activeBackendLabel)")
                             .font(.system(size: 11, weight: .medium, design: .monospaced))
                             .foregroundColor(Color(hex: "#30D158"))
                     }
                 }
 
-                TextEditor(text: $whisperEngine.liveTestTranscript)
-                    .font(.system(size: 15, weight: .regular))
-                    .foregroundColor(.white)
-                    .scrollContentBackground(.hidden)
+                // Lecture seule : un champ éditable recevrait le texte deux fois (aperçu + clavier)
+                ScrollView {
+                    Text(whisperEngine.liveTestTranscript)
+                        .font(.system(size: 15, weight: .regular))
+                        .foregroundColor(.white)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
                     .padding(10)
                     .frame(minHeight: 96, maxHeight: 140)
                     .background(
@@ -468,7 +474,7 @@ public struct ContentView: View {
             cardSectionHeader(
                 icon: "cpu",
                 title: "Catalogue des 7 Modèles Whisper",
-                subtitle: "GPU Metal + FlashAttention • \(unlockedCount)/7 modèles débloqués sur votre appareil"
+                subtitle: "100 % local • \(unlockedCount)/7 modèles débloqués sur votre appareil"
             )
 
             // Switch de test matériel (Simuler un téléphone 4 Go RAM : débloque jusqu'à Whisper Expert v3 Turbo)
@@ -695,7 +701,7 @@ public struct ContentView: View {
                     }) {
                         HStack(spacing: 6) {
                             Image(systemName: "arrow.down.circle")
-                            Text("Télécharger (\(tier.sizeMB) Mo)")
+                            Text("Télécharger (\(tier.sizeMB) Mo)\(networkMonitor.isExpensive ? " • réseau mobile" : "")")
                         }
                         .font(.system(size: 12, weight: .semibold))
                         .padding(.horizontal, 12)
@@ -1169,8 +1175,24 @@ public struct ContentView: View {
                 subtitle: "Disponible pour Apple (iPhone, iPad, Mac) et Android (.apk)"
             )
 
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Activer le clavier")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white)
+                Text("Réglages > Général > Clavier > Claviers > Ajouter un clavier > WhisperOrb Clavier, puis activez « Autoriser l'accès complet ». Sans cet accès, le clavier ne peut pas recevoir la dictée.")
+                    .font(.system(size: 12))
+                    .foregroundColor(Color.white.opacity(0.65))
+                    .fixedSize(horizontal: false, vertical: true)
+                if !appGroup.isSharedContainerAvailable {
+                    Text("⚠️ App Group indisponible : l'app et le clavier ne peuvent pas communiquer. Réinstallez avec un outil qui provisionne les App Groups.")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(Color(hex: "#FF9F0A"))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
             HStack(alignment: .center, spacing: 16) {
-                if let qrUIImage = generateHighContrastQRCode(from: githubReleasesURLString) {
+                if let qrUIImage = Self.releasesQRCode {
                     Image(uiImage: qrUIImage)
                         .interpolation(.none)
                         .resizable()
@@ -1225,7 +1247,7 @@ public struct ContentView: View {
         .background(cardBackgroundSurface)
     }
 
-    private func generateHighContrastQRCode(from string: String) -> UIImage? {
+    private static func generateHighContrastQRCode(from string: String) -> UIImage? {
         let context = CIContext()
         let filter = CIFilter.qrCodeGenerator()
         filter.message = Data(string.utf8)
