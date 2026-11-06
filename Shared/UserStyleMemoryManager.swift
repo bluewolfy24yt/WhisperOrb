@@ -170,16 +170,28 @@ public final class UserStyleMemoryManager: ObservableObject {
     }
 
     public func reloadFromDisk() {
-        // Appelé à chaque rafraîchissement : on ne relit le JSON que s'il a changé
-        let attributes = try? FileManager.default.attributesOfItem(atPath: memoryFileURL.path)
-        let modificationDate = attributes?[.modificationDate] as? Date
-        if let modificationDate = modificationDate, modificationDate == lastLoadedModificationDate {
-            return
+        let hasAppGroup = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: AppGroupManager.appGroupIdentifier) != nil
+        if hasAppGroup {
+            let attributes = try? FileManager.default.attributesOfItem(atPath: memoryFileURL.path)
+            let modificationDate = attributes?[.modificationDate] as? Date
+            if let modificationDate = modificationDate, modificationDate == lastLoadedModificationDate {
+                return
+            }
+            lastLoadedModificationDate = modificationDate
         }
-        lastLoadedModificationDate = modificationDate
 
-        guard let data = try? Data(contentsOf: memoryFileURL),
-              let decoded = try? JSONDecoder().decode(UserStyleMemoryPayload.self, from: data) else {
+        let decoder = JSONDecoder()
+        let diskDecoded = (try? Data(contentsOf: memoryFileURL)).flatMap { try? decoder.decode(UserStyleMemoryPayload.self, from: $0) }
+        let kcDecoded = (!hasAppGroup ? AppGroupManager.loadSharedKeychainData(account: Self.fileName) : nil).flatMap { try? decoder.decode(UserStyleMemoryPayload.self, from: $0) }
+
+        let decoded: UserStyleMemoryPayload
+        if let d = diskDecoded, let k = kcDecoded {
+            decoded = k.updatedAt >= d.updatedAt ? k : d
+        } else if let k = kcDecoded {
+            decoded = k
+        } else if let d = diskDecoded {
+            decoded = d
+        } else {
             return
         }
         isReloadingFromDisk = true
@@ -209,6 +221,9 @@ public final class UserStyleMemoryManager: ObservableObject {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         if let data = try? encoder.encode(payload) {
             try? data.write(to: url, options: [.atomic])
+            if FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: AppGroupManager.appGroupIdentifier) == nil {
+                AppGroupManager.saveSharedKeychainData(data, account: Self.fileName)
+            }
         }
     }
 

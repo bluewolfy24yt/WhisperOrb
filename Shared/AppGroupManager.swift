@@ -4,6 +4,7 @@ import UIKit
 import Combine
 import CoreFoundation
 import Metal
+import Security
 import GameController
 
 // MARK: - Sélecteur Intelligent de Langue Multilingue (Zéro "fr" codé en dur)
@@ -788,6 +789,40 @@ public final class AppGroupManager: ObservableObject {
     public static let darwinStateUpdatedNotification = "com.bluewolfy24yt.whisperorb.stateUpdated"
     public static let darwinAudioLevelUpdatedNotification = "com.bluewolfy24yt.whisperorb.audioLevel"
     public static let pasteboardBusName = UIPasteboard.Name("com.bluewolfy24yt.whisperorb.bus")
+    private static let keychainIPCService = "com.bluewolfy24yt.whisperorb.ipc"
+
+    public static func saveSharedKeychainData(_ data: Data, account: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainIPCService,
+            kSecAttrAccount as String: account
+        ]
+        let attributes: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
+        ]
+        let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if status == errSecItemNotFound {
+            var addQuery = query
+            addQuery[kSecValueData as String] = data
+            addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+            SecItemAdd(addQuery as CFDictionary, nil)
+        }
+    }
+
+    public static func loadSharedKeychainData(account: String) -> Data? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainIPCService,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess else { return nil }
+        return result as? Data
+    }
 
     // MARK: - Propriétés @Published Synchronisées
 
@@ -965,20 +1000,40 @@ public final class AppGroupManager: ObservableObject {
         sharedContainerURL.appendingPathComponent("whisperorb_heartbeat", isDirectory: false)
     }
 
+    public var hasNativeAppGroupContainer: Bool {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: Self.appGroupIdentifier) != nil
+    }
+
     public func recordEngineHeartbeat() {
         let now = Date().timeIntervalSince1970
         userDefaults.set(now, forKey: Keys.engineHeartbeatTimestamp)
-        try? String(now).write(to: heartbeatFileURL, atomically: false, encoding: .utf8)
+        let str = String(now)
+        try? str.write(to: heartbeatFileURL, atomically: false, encoding: .utf8)
+        if !hasNativeAppGroupContainer, let data = str.data(using: .utf8) {
+            Self.saveSharedKeychainData(data, account: Keys.engineHeartbeatTimestamp)
+        }
     }
 
     public func clearEngineHeartbeat() {
         userDefaults.set(0.0, forKey: Keys.engineHeartbeatTimestamp)
         try? "0".write(to: heartbeatFileURL, atomically: false, encoding: .utf8)
+        if !hasNativeAppGroupContainer, let data = "0".data(using: .utf8) {
+            Self.saveSharedKeychainData(data, account: Keys.engineHeartbeatTimestamp)
+        }
     }
 
     public var isEngineHeartbeatFresh: Bool {
         let fileBeat = (try? String(contentsOf: heartbeatFileURL, encoding: .utf8)).flatMap { Double($0) } ?? 0
-        let lastBeat = max(fileBeat, userDefaults.double(forKey: Keys.engineHeartbeatTimestamp))
+        let keychainBeat: Double
+        if !hasNativeAppGroupContainer,
+           let kcData = Self.loadSharedKeychainData(account: Keys.engineHeartbeatTimestamp),
+           let kcStr = String(data: kcData, encoding: .utf8),
+           let val = Double(kcStr) {
+            keychainBeat = val
+        } else {
+            keychainBeat = 0
+        }
+        let lastBeat = max(max(fileBeat, keychainBeat), userDefaults.double(forKey: Keys.engineHeartbeatTimestamp))
         guard lastBeat > 0 else { return false }
         return (Date().timeIntervalSince1970 - lastBeat) < 6.0
     }
@@ -1008,7 +1063,13 @@ public final class AppGroupManager: ObservableObject {
     }
 
     public var isSharedContainerAvailable: Bool {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: Self.appGroupIdentifier) != nil
+        if hasNativeAppGroupContainer { return true }
+        if let existing = Self.loadSharedKeychainData(account: Keys.sharedPayloadData), !existing.isEmpty {
+            return true
+        }
+        let probe = Data("ok".utf8)
+        Self.saveSharedKeychainData(probe, account: "whisperorb.ipc.probe")
+        return Self.loadSharedKeychainData(account: "whisperorb.ipc.probe") != nil
     }
 
     private var sharedStateFileURL: URL {
@@ -1021,21 +1082,28 @@ public final class AppGroupManager: ObservableObject {
         let decoder = JSONDecoder()
         var freshest: WhisperSharedStatePayload? = nil
 
-        if let defaultsData = userDefaults.data(forKey: Keys.sharedPayloadData),
-           let payload = try? decoder.decode(WhisperSharedStatePayload.self, from: defaultsData) {
-            freshest = payload
-        }
-
-        if let fileData = try? Data(contentsOf: sharedStateFileURL),
-           let filePayload = try? decoder.decode(WhisperSharedStatePayload.self, from: fileData) {
+        let consider: (Data?) -> Void = { data in
+            guard let data = data,
+                  let candidate = try? decoder.decode(WhisperSharedStatePayload.self, from: data) else {
+                return
+            }
             if let current = freshest {
-                if filePayload.updatedAt >= current.updatedAt {
-                    freshest = filePayload
+                if candidate.updatedAt >= current.updatedAt {
+                    freshest = candidate
                 }
             } else {
-                freshest = filePayload
+                freshest = candidate
             }
         }
+
+        if !hasNativeAppGroupContainer {
+            consider(Self.loadSharedKeychainData(account: Keys.sharedPayloadData))
+            if let pb = UIPasteboard(name: Self.pasteboardBusName, create: false) {
+                consider(pb.data(forPasteboardType: "public.json"))
+            }
+        }
+        consider(userDefaults.data(forKey: Keys.sharedPayloadData))
+        consider(try? Data(contentsOf: sharedStateFileURL))
 
         return freshest
     }
@@ -1083,6 +1151,12 @@ public final class AppGroupManager: ObservableObject {
         guard let encoded = try? JSONEncoder().encode(payload) else { return }
         userDefaults.set(encoded, forKey: Keys.sharedPayloadData)
         try? encoded.write(to: sharedStateFileURL, options: [.atomic])
+        if !hasNativeAppGroupContainer {
+            Self.saveSharedKeychainData(encoded, account: Keys.sharedPayloadData)
+            if let pb = UIPasteboard(name: Self.pasteboardBusName, create: true) {
+                pb.setData(encoded, forPasteboardType: "public.json")
+            }
+        }
     }
 
     public func persistAndBroadcastState(postDarwinNotification: Bool = true, overwritePendingTextState: Bool = false) {
@@ -1198,12 +1272,23 @@ public final class AppGroupManager: ObservableObject {
         }
 
         userDefaults.set(clamped, forKey: Keys.liveAudioLevel)
+        if !hasNativeAppGroupContainer, let data = String(clamped).data(using: .utf8) {
+            Self.saveSharedKeychainData(data, account: Keys.liveAudioLevel)
+        }
         postDarwinNotificationNamed(Self.darwinAudioLevelUpdatedNotification)
     }
 
     private func reloadLiveAudioLevelOnly() {
         guard isKeyboardExtensionProcess else { return }
-        let level = userDefaults.float(forKey: Keys.liveAudioLevel)
+        let level: Float
+        if !hasNativeAppGroupContainer,
+           let kcData = Self.loadSharedKeychainData(account: Keys.liveAudioLevel),
+           let kcStr = String(data: kcData, encoding: .utf8),
+           let val = Float(kcStr) {
+            level = val
+        } else {
+            level = userDefaults.float(forKey: Keys.liveAudioLevel)
+        }
         if abs(self.currentAudioLevel - level) > 0.01 {
             if Thread.isMainThread {
                 self.currentAudioLevel = level
