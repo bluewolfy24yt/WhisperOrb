@@ -1129,7 +1129,7 @@ public struct ContentView: View {
                         .foregroundColor(Color.white.opacity(0.80))
                 }
 
-                Slider(value: $appGroup.vadSilenceThresholdSeconds, in: 0.45...2.0, step: 0.05)
+                Slider(value: $appGroup.vadSilenceThresholdSeconds, in: 0.55...3.0, step: 0.05)
                     .tint(Color(hex: "#0A84FF"))
             }
 

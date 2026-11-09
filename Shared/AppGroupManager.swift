@@ -569,11 +569,12 @@ public struct HardwareDetector {
 
     public static func recommendedTier(simulate4GB: Bool = false) -> WhisperModelTier {
         let ram = effectiveMemoryGB(simulate4GB: simulate4GB)
-        if ram >= 11.2 {
+        if isRunningOnMac && ram >= 11.2 {
             return .expertPlus
-        } else if ram >= 5.4 {
+        } else if isRunningOnMac && ram >= 5.4 {
             return .zeroFaute
         } else if ram >= 3.6 {
+            // Sur iPad/iPhone, Whisper PRO (Small Q5) offre la meilleure réactivité en arrière-plan depuis le clavier
             return .normal
         } else if ram >= 2.8 {
             return .eclair
@@ -592,9 +593,9 @@ public struct HardwareDetector {
             return max(4, min(8, totalCores - 2))
         }
         if UIDevice.current.userInterfaceIdiom == .phone {
-            return 2
+            return max(2, min(4, totalCores - 2))
         }
-        return min(totalCores, min(6, max(4, totalCores / 2)))
+        return max(4, min(8, totalCores - 1))
     }
 
     public static var telemetrySummary: String {
@@ -739,6 +740,7 @@ public struct WhisperSharedStatePayload: Codable, Equatable {
     public var autoPunctuation: Bool
     public var vadSilenceThresholdSeconds: Double
     public var isBackgroundEngineActive: Bool
+    public var engineHeartbeatAt: TimeInterval?
     public var isKeyboardCollapsed: Bool?
     public var isSmartAutocorrectEnabled: Bool?
     public var downloadedModelRaws: [String]?
@@ -789,39 +791,100 @@ public final class AppGroupManager: ObservableObject {
     public static let darwinStateUpdatedNotification = "com.bluewolfy24yt.whisperorb.stateUpdated"
     public static let darwinAudioLevelUpdatedNotification = "com.bluewolfy24yt.whisperorb.audioLevel"
     public static let pasteboardBusName = UIPasteboard.Name("com.bluewolfy24yt.whisperorb.bus")
+    public static let heartbeatPasteboardName = UIPasteboard.Name("com.bluewolfy24yt.whisperorb.heartbeat")
     private static let keychainIPCService = "com.bluewolfy24yt.whisperorb.ipc"
 
-    public static func saveSharedKeychainData(_ data: Data, account: String) {
+    /// Résout le groupe Keychain partagé (<TeamID>.com.bluewolfy24yt.whisperorb) entre l'app et le clavier
+    private static let resolvedSharedKeychainAccessGroup: String? = {
+        let probeAccount = "whisperorb.teamid.probe"
         let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "com.bluewolfy24yt.whisperorb.teamprobe",
+            kSecAttrAccount as String: probeAccount,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
+            kSecReturnAttributes as String: true
+        ]
+        SecItemDelete(query as CFDictionary)
+        var result: AnyObject?
+        let status = SecItemAdd(query as CFDictionary, &result)
+        SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess,
+              let attrs = result as? [String: Any],
+              let currentGroup = attrs[kSecAttrAccessGroup as String] as? String else {
+            return nil
+        }
+        // Si on est dans l'extension (.keyboard), le groupe de l'app parente est sans le suffixe .keyboard
+        if currentGroup.hasSuffix(".keyboard") {
+            return String(currentGroup.dropLast(".keyboard".count))
+        } else if currentGroup.hasSuffix(".WhisperKeyboard") {
+            return String(currentGroup.dropLast(".WhisperKeyboard".count))
+        }
+        return currentGroup
+    }()
+
+    public static func saveSharedKeychainData(_ data: Data, account: String) {
+        var scopes: [[String: Any]] = []
+        if let sharedGroup = resolvedSharedKeychainAccessGroup {
+            scopes.append([
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: keychainIPCService,
+                kSecAttrAccount as String: account,
+                kSecAttrAccessGroup as String: sharedGroup
+            ])
+        }
+        scopes.append([
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: keychainIPCService,
             kSecAttrAccount as String: account
-        ]
-        let attributes: [String: Any] = [
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
-        ]
-        let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
-        if status == errSecItemNotFound {
-            var addQuery = query
-            addQuery[kSecValueData as String] = data
-            addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-            SecItemAdd(addQuery as CFDictionary, nil)
+        ])
+
+        for query in scopes {
+            let attributes: [String: Any] = [
+                kSecValueData as String: data,
+                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
+            ]
+            let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+            if status == errSecItemNotFound {
+                var addQuery = query
+                addQuery[kSecValueData as String] = data
+                addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+                if SecItemAdd(addQuery as CFDictionary, nil) == errSecSuccess {
+                    return
+                }
+            } else if status == errSecSuccess {
+                return
+            }
         }
     }
 
     public static func loadSharedKeychainData(account: String) -> Data? {
-        let query: [String: Any] = [
+        var scopes: [[String: Any]] = []
+        if let sharedGroup = resolvedSharedKeychainAccessGroup {
+            scopes.append([
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: keychainIPCService,
+                kSecAttrAccount as String: account,
+                kSecAttrAccessGroup as String: sharedGroup,
+                kSecReturnData as String: true,
+                kSecMatchLimit as String: kSecMatchLimitOne
+            ])
+        }
+        scopes.append([
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: keychainIPCService,
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess else { return nil }
-        return result as? Data
+        ])
+
+        for query in scopes {
+            var result: AnyObject?
+            let status = SecItemCopyMatching(query as CFDictionary, &result)
+            if status == errSecSuccess, let data = result as? Data {
+                return data
+            }
+        }
+        return nil
     }
 
     // MARK: - Propriétés @Published Synchronisées
@@ -887,7 +950,7 @@ public final class AppGroupManager: ObservableObject {
         didSet { if !isApplyingRemoteUpdate && oldValue != autoPunctuation { persistAndBroadcastState() } }
     }
 
-    @Published public var vadSilenceThresholdSeconds: Double = 1.0 {
+    @Published public var vadSilenceThresholdSeconds: Double = 1.45 {
         didSet { if !isApplyingRemoteUpdate && oldValue != vadSilenceThresholdSeconds { persistAndBroadcastState() } }
     }
 
@@ -1011,7 +1074,20 @@ public final class AppGroupManager: ObservableObject {
         try? str.write(to: heartbeatFileURL, atomically: false, encoding: .utf8)
         if !hasNativeAppGroupContainer, let data = str.data(using: .utf8) {
             Self.saveSharedKeychainData(data, account: Keys.engineHeartbeatTimestamp)
+            writeHeartbeatToPasteboard(data)
         }
+    }
+
+    private func writeHeartbeatToPasteboard(_ data: Data) {
+        UIPasteboard(name: Self.heartbeatPasteboardName, create: true)?
+            .setData(data, forPasteboardType: "public.utf8-plain-text")
+    }
+
+    private func readHeartbeatFromPasteboard() -> Double {
+        guard let pb = UIPasteboard(name: Self.heartbeatPasteboardName, create: false),
+              let data = pb.data(forPasteboardType: "public.utf8-plain-text"),
+              let str = String(data: data, encoding: .utf8) else { return 0 }
+        return Double(str) ?? 0
     }
 
     public func clearEngineHeartbeat() {
@@ -1019,23 +1095,30 @@ public final class AppGroupManager: ObservableObject {
         try? "0".write(to: heartbeatFileURL, atomically: false, encoding: .utf8)
         if !hasNativeAppGroupContainer, let data = "0".data(using: .utf8) {
             Self.saveSharedKeychainData(data, account: Keys.engineHeartbeatTimestamp)
+            writeHeartbeatToPasteboard(data)
         }
     }
 
     public var isEngineHeartbeatFresh: Bool {
-        let fileBeat = (try? String(contentsOf: heartbeatFileURL, encoding: .utf8)).flatMap { Double($0) } ?? 0
+        let fileBeat = hasNativeAppGroupContainer
+            ? ((try? String(contentsOf: heartbeatFileURL, encoding: .utf8)).flatMap { Double($0) } ?? 0)
+            : 0
         let keychainBeat: Double
         if !hasNativeAppGroupContainer,
            let kcData = Self.loadSharedKeychainData(account: Keys.engineHeartbeatTimestamp),
            let kcStr = String(data: kcData, encoding: .utf8),
            let val = Double(kcStr) {
-            keychainBeat = val
+            keychainBeat = max(val, readHeartbeatFromPasteboard())
+        } else if !hasNativeAppGroupContainer {
+            keychainBeat = readHeartbeatFromPasteboard()
         } else {
             keychainBeat = 0
         }
-        let lastBeat = max(max(fileBeat, keychainBeat), userDefaults.double(forKey: Keys.engineHeartbeatTimestamp))
+        let defaultsBeat = hasNativeAppGroupContainer ? userDefaults.double(forKey: Keys.engineHeartbeatTimestamp) : 0
+        let payloadBeat = readFreshestPayload()?.engineHeartbeatAt ?? 0
+        let lastBeat = max(max(fileBeat, keychainBeat), max(defaultsBeat, payloadBeat))
         guard lastBeat > 0 else { return false }
-        return (Date().timeIntervalSince1970 - lastBeat) < 6.0
+        return (Date().timeIntervalSince1970 - lastBeat) < 12.0
     }
 
     // MARK: - Répertoires Partagés
@@ -1064,12 +1147,8 @@ public final class AppGroupManager: ObservableObject {
 
     public var isSharedContainerAvailable: Bool {
         if hasNativeAppGroupContainer { return true }
-        if let existing = Self.loadSharedKeychainData(account: Keys.sharedPayloadData), !existing.isEmpty {
-            return true
-        }
-        let probe = Data("ok".utf8)
-        Self.saveSharedKeychainData(probe, account: "whisperorb.ipc.probe")
-        return Self.loadSharedKeychainData(account: "whisperorb.ipc.probe") != nil
+        // Vérifie que le groupe Keychain partagé est bien résolu pour l'IPC App <-> Clavier
+        return Self.resolvedSharedKeychainAccessGroup != nil
     }
 
     private var sharedStateFileURL: URL {
@@ -1222,6 +1301,10 @@ public final class AppGroupManager: ObservableObject {
             }
         }
 
+        let authoritativeHeartbeatAt: TimeInterval? = isKeyboardExtensionProcess
+            ? existing?.engineHeartbeatAt
+            : (isBackgroundEngineActive ? now : 0.0)
+
         let payload = WhisperSharedStatePayload(
             bgHex: bgHex,
             fgHex: fgHex,
@@ -1239,6 +1322,7 @@ public final class AppGroupManager: ObservableObject {
             autoPunctuation: autoPunctuation,
             vadSilenceThresholdSeconds: vadSilenceThresholdSeconds,
             isBackgroundEngineActive: authoritativeBgEngineActive,
+            engineHeartbeatAt: authoritativeHeartbeatAt,
             isKeyboardCollapsed: isKeyboardCollapsed,
             isSmartAutocorrectEnabled: isSmartAutocorrectEnabled,
             downloadedModelRaws: authoritativeDownloadedModels,
@@ -1468,9 +1552,16 @@ public final class AppGroupManager: ObservableObject {
 
         let updateBlock = { [weak self] in
             guard let self = self else { return }
-            self.lastInsertedSentenceLength = formattedText.count
-            self.pendingTranscribedText = formattedText
-            self.pendingTextUpdatedAt = Date().timeIntervalSince1970
+            let now = Date().timeIntervalSince1970
+            let onDisk = self.readFreshestPayload()
+            let unconsumedText = onDisk?.pendingTranscribedText ?? self.pendingTranscribedText
+            let unconsumedAge = now - (onDisk?.pendingTextUpdatedAt ?? self.pendingTextUpdatedAt ?? 0)
+            let combinedText = (!unconsumedText.isEmpty && unconsumedAge <= 45.0)
+                ? unconsumedText + formattedText
+                : formattedText
+            self.lastInsertedSentenceLength = combinedText.count
+            self.pendingTranscribedText = combinedText
+            self.pendingTextUpdatedAt = now
             self.setOrbStateWithoutBroadcast(.idle)
             self.currentAudioLevel = 0.0
             self.userDefaults.set(Float(0.0), forKey: Keys.liveAudioLevel)
@@ -1510,6 +1601,11 @@ public final class AppGroupManager: ObservableObject {
     public func triggerDeleteLastSentence() {
         let updateBlock = { [weak self] in
             guard let self = self else { return }
+            if let onDisk = self.readFreshestPayload() {
+                self.pendingTranscribedText = onDisk.pendingTranscribedText
+                self.pendingTextUpdatedAt = onDisk.pendingTextUpdatedAt
+                self.lastInsertedSentenceLength = onDisk.lastInsertedSentenceLength
+            }
             guard self.lastInsertedSentenceLength > 0 else {
                 self.orbState = .idle
                 return

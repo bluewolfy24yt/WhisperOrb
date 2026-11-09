@@ -41,13 +41,16 @@ public struct KeyboardFieldTraits: Equatable {
 }
 
 /// Chaque touche a son propre état de geste : un état partagé annulerait la touche
-/// voisine pendant la frappe à deux mains.
+/// voisine pendant la frappe à deux mains sur iPad.
 private struct KeyTouchGesture: ViewModifier {
     @GestureState private var isTouchActive = false
+    @State private var didBeginTouch = false
+    @State private var didEndNormally = false
 
-    let onChanged: (DragGesture.Value) -> Void
-    let onEnded: () -> Void
-    let onCancelled: () -> Void
+    let onTouchBegan: () -> Void
+    let onTouchMoved: (DragGesture.Value) -> Void
+    let onTouchEnded: () -> Void
+    let onTouchCancelled: () -> Void
 
     func body(content: Content) -> some View {
         content
@@ -56,14 +59,25 @@ private struct KeyTouchGesture: ViewModifier {
                     .updating($isTouchActive) { _, state, _ in
                         state = true
                     }
-                    .onChanged(onChanged)
+                    .onChanged { value in
+                        if !didBeginTouch {
+                            didBeginTouch = true
+                            didEndNormally = false
+                            onTouchBegan()
+                        } else {
+                            onTouchMoved(value)
+                        }
+                    }
                     .onEnded { _ in
-                        onEnded()
+                        didEndNormally = true
+                        didBeginTouch = false
+                        onTouchEnded()
                     }
             )
             .onChange(of: isTouchActive) { active in
-                if !active {
-                    onCancelled()
+                if !active && didBeginTouch && !didEndNormally {
+                    didBeginTouch = false
+                    onTouchCancelled()
                 }
             }
     }
@@ -263,6 +277,7 @@ public struct KeyboardLayoutView: View {
 
     // État temps réel de la touche pressée (Loupe Apple + Appui long variantes/accents)
     @State private var pressedKeyID: String? = nil
+    @State private var keyPressStartTime: Date = .distantPast
     @State private var isShowingLongPressVariants: Bool = false
     @State private var activeVariants: [String] = []
     @State private var selectedVariantIndex: Int = 0
@@ -287,6 +302,10 @@ public struct KeyboardLayoutView: View {
         "w", "x", "c", "v", "b", "n", "'"
     ]
 
+    private let row3LettersWXCVPad: [String] = [
+        "w", "x", "c", "v", "b", "n", ",", ".", "'"
+    ]
+
     private let row1LettersQWERTY: [String] = [
         "q", "w", "e", "r", "t", "y", "u", "i", "o", "p"
     ]
@@ -297,6 +316,10 @@ public struct KeyboardLayoutView: View {
 
     private let row3LettersZXCV: [String] = [
         "z", "x", "c", "v", "b", "n", "m"
+    ]
+
+    private let row3LettersZXCVPad: [String] = [
+        "z", "x", "c", "v", "b", "n", "m", ",", "."
     ]
 
     private var isAZERTYLayout: Bool {
@@ -407,6 +430,29 @@ public struct KeyboardLayoutView: View {
         UIDevice.current.userInterfaceIdiom == .pad && (containerWidth == 0 || containerWidth >= 500)
     }
 
+    // Mode Clavier Flottant iPadOS (fenêtre pincée < 450 pt, hauteur plafonnée par iPadOS à ~254 pt)
+    private var isFloatingIPad: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad && containerWidth > 0 && containerWidth < 450
+    }
+
+    private var keyRowHeight: CGFloat {
+        if isIPad { return 45 }
+        if isFloatingIPad { return 35 }
+        return 42
+    }
+
+    private var suggestionBarHeight: CGFloat {
+        if isIPad { return 32 }
+        if isFloatingIPad { return 25 }
+        return 28
+    }
+
+    private var verticalRowSpacing: CGFloat {
+        if isIPad { return 7 }
+        if isFloatingIPad { return 4 }
+        return 6
+    }
+
     public var body: some View {
         ZStack(alignment: .top) {
             Color(hex: "#1C1C1E")
@@ -415,9 +461,9 @@ public struct KeyboardLayoutView: View {
             if appGroup.isKeyboardCollapsed {
                 collapsedVoiceBarView
                     .padding(.horizontal, isIPad ? 12 : 8)
-                    .padding(.vertical, isIPad ? 8 : 6)
+                    .padding(.vertical, isIPad ? 8 : (isFloatingIPad ? 4 : 6))
             } else {
-                VStack(spacing: isIPad ? 7 : 6) {
+                VStack(spacing: verticalRowSpacing) {
                     topVoiceControlBar
 
                     if showQuickOrbPopover {
@@ -443,8 +489,8 @@ public struct KeyboardLayoutView: View {
                     }
                 }
                 .padding(.horizontal, isIPad ? 8 : 3)
-                .padding(.top, isIPad ? 6 : 4)
-                .padding(.bottom, isIPad ? 6 : 3)
+                .padding(.top, isIPad ? 6 : (isFloatingIPad ? 3 : 4))
+                .padding(.bottom, isIPad ? 6 : (isFloatingIPad ? 2 : 3))
             }
         }
         .background(
@@ -471,7 +517,15 @@ public struct KeyboardLayoutView: View {
         .onChange(of: appGroup.selectedLanguage) { _ in
             refreshAutocorrectSuggestions(preferLocalBuffer: true)
         }
-        .onReceive(NotificationCenter.default.publisher(for: KeyboardViewController.textDidChangeNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: KeyboardViewController.textDidChangeNotification)) { notification in
+            if let dictatedText = notification.object as? String {
+                let proxyContext = contextBeforeCursorProvider()
+                localTypedContextBuffer = proxyContext.hasSuffix(dictatedText) ? proxyContext : proxyContext + dictatedText
+                lastLocalEditTime = Date()
+                updateAutoShiftForContext(localTypedContextBuffer, allowLowering: true)
+                refreshAutocorrectSuggestions(preferLocalBuffer: true)
+                return
+            }
             syncContextFromDocumentProxy(force: false)
         }
     }
@@ -504,7 +558,11 @@ public struct KeyboardLayoutView: View {
 
     private var activeRow3Keys: [String] {
         switch currentLayer {
-        case .letters, .emojis: return isAZERTYLayout ? row3LettersWXCV : row3LettersZXCV
+        case .letters, .emojis:
+            if isIPad {
+                return isAZERTYLayout ? row3LettersWXCVPad : row3LettersZXCVPad
+            }
+            return isAZERTYLayout ? row3LettersWXCV : row3LettersZXCV
         case .numbers: return row3Numbers
         case .symbols: return row3Symbols
         }
@@ -982,7 +1040,7 @@ public struct KeyboardLayoutView: View {
                     .foregroundColor(Color.white.opacity(0.86))
                     .lineLimit(1)
                     .frame(maxWidth: .infinity)
-                    .frame(height: isIPad ? 32 : 28)
+                    .frame(height: suggestionBarHeight)
                     .background(
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
                             .fill(Color(hex: "#262629"))
@@ -999,7 +1057,7 @@ public struct KeyboardLayoutView: View {
                     .foregroundColor(.white)
                     .lineLimit(1)
                     .frame(maxWidth: .infinity)
-                    .frame(height: isIPad ? 32 : 28)
+                    .frame(height: suggestionBarHeight)
                     .background(
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
                             .fill(highlightCenter ? Color(hex: "#0A84FF").opacity(0.32) : Color(hex: "#2E2E32"))
@@ -1020,7 +1078,7 @@ public struct KeyboardLayoutView: View {
                     .foregroundColor(Color.white.opacity(0.86))
                     .lineLimit(1)
                     .frame(maxWidth: .infinity)
-                    .frame(height: isIPad ? 32 : 28)
+                    .frame(height: suggestionBarHeight)
                     .background(
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
                             .fill(Color(hex: "#262629"))
@@ -1034,19 +1092,45 @@ public struct KeyboardLayoutView: View {
     private func applySuggestionCandidate(_ candidate: String, replaceCount: Int) {
         guard !candidate.isEmpty else { return }
         appGroup.clearLastInsertedSentenceLength()
-        if replaceCount > 0 {
-            for _ in 0..<replaceCount {
+
+        let proxyContext = contextBeforeCursorProvider()
+        if proxyContext.isEmpty && Date().timeIntervalSince(lastLocalEditTime) > 0.12 {
+            localTypedContextBuffer = ""
+        }
+
+        let effectiveContext = localTypedContextBuffer.isEmpty ? proxyContext : localTypedContextBuffer
+        let safeReplaceCount = min(max(0, replaceCount), effectiveContext.count)
+
+        if safeReplaceCount > 0 {
+            let typedWord = String(effectiveContext.suffix(safeReplaceCount))
+            // On conserve le préfixe commun exact entre le mot déjà écrit et la suggestion
+            // afin de réduire au minimum les appels à deleteBackward() (évite les doublons dans les WebViews iPad).
+            var commonPrefixCount = 0
+            var typedIter = typedWord.makeIterator()
+            var candIter = candidate.makeIterator()
+            while let tChar = typedIter.next(), let cChar = candIter.next(), tChar == cChar {
+                commonPrefixCount += 1
+            }
+
+            let deletesNeeded = max(0, typedWord.count - commonPrefixCount)
+            for _ in 0..<deletesNeeded {
                 onDeleteBackward()
             }
-            if localTypedContextBuffer.count >= replaceCount {
-                localTypedContextBuffer.removeLast(replaceCount)
+            if localTypedContextBuffer.count >= deletesNeeded {
+                localTypedContextBuffer.removeLast(deletesNeeded)
             } else {
                 localTypedContextBuffer = ""
             }
+
+            let suffixToInsert = String(candidate.dropFirst(commonPrefixCount)) + " "
+            onInsertText(suffixToInsert)
+            localTypedContextBuffer += suffixToInsert
+        } else {
+            let committed = candidate + " "
+            onInsertText(committed)
+            localTypedContextBuffer += committed
         }
-        let committed = candidate + " "
-        onInsertText(committed)
-        localTypedContextBuffer += committed
+
         lastLocalEditTime = Date()
         if shiftState == .uppercased {
             shiftState = .lowercased
@@ -1067,9 +1151,22 @@ public struct KeyboardLayoutView: View {
         }
 
         let proxyContext = contextBeforeCursorProvider()
-        if force || Date().timeIntervalSince(lastLocalEditTime) > 0.25 || localTypedContextBuffer.isEmpty {
+        let elapsedSinceLocalEdit = Date().timeIntervalSince(lastLocalEditTime)
+
+        if force || fieldChanged {
+            localTypedContextBuffer = proxyContext
+        } else if proxyContext.isEmpty && elapsedSinceLocalEdit > 0.10 {
+            localTypedContextBuffer = ""
+        } else if elapsedSinceLocalEdit <= 0.22 && !proxyContext.isEmpty &&
+                  (localTypedContextBuffer.hasPrefix(proxyContext) || proxyContext.hasSuffix(localTypedContextBuffer)) {
+            // La notification textDidChange arrive avec une frappe de retard : on garde le tampon local
+            // sans relancer UITextChecker inutilement.
+            updateAutoShiftForContext(localTypedContextBuffer, allowLowering: false)
+            return
+        } else {
             localTypedContextBuffer = proxyContext
         }
+
         updateAutoShiftForContext(localTypedContextBuffer, allowLowering: force || fieldChanged)
         refreshAutocorrectSuggestions(preferLocalBuffer: true)
     }
@@ -1248,7 +1345,7 @@ public struct KeyboardLayoutView: View {
         }
     }
 
-    // MARK: - Rangée 3 : ⇧ Maj + W X C V B N ' + ⌫ Suppr
+    // MARK: - Rangée 3 : ⇧ Maj + W X C V B N (, . ') + ⌫ Suppr
 
     private var row3WithShiftAndBackspace: some View {
         HStack(spacing: isIPad ? 8 : 6) {
@@ -1269,7 +1366,7 @@ public struct KeyboardLayoutView: View {
                     }
                 }
                 .foregroundColor(shiftKeyForegroundColor)
-                .frame(width: isIPad ? 58 : 42, height: isIPad ? 45 : 42)
+                .frame(width: isIPad ? 58 : 42, height: keyRowHeight)
                 .background(
                     RoundedRectangle(cornerRadius: 5.0, style: .continuous)
                         .fill(shiftKeyBackgroundColor)
@@ -1295,7 +1392,7 @@ public struct KeyboardLayoutView: View {
             Image(systemName: isHoldingBackspace ? "delete.left.fill" : "delete.left")
                 .font(.system(size: isIPad ? 18 : 16, weight: .regular))
                 .foregroundColor(.white)
-                .frame(width: isIPad ? 58 : 42, height: isIPad ? 45 : 42)
+                .frame(width: isIPad ? 58 : 42, height: keyRowHeight)
                 .background(
                     RoundedRectangle(cornerRadius: 5.0, style: .continuous)
                         .fill(isHoldingBackspace ? Color(hex: "#636366") : Color(hex: "#48484A"))
@@ -1326,10 +1423,10 @@ public struct KeyboardLayoutView: View {
         let displayedChar = displayStringForKey(key)
 
         Text(displayedChar)
-            .font(.system(size: isIPad ? 22 : 21, weight: .regular))
+            .font(.system(size: isIPad ? 22 : (isFloatingIPad ? 19 : 21), weight: .regular))
             .foregroundColor(.white)
             .frame(maxWidth: .infinity)
-            .frame(height: isIPad ? 45 : 42)
+            .frame(height: keyRowHeight)
             .background(
                 RoundedRectangle(cornerRadius: 5.0, style: .continuous)
                     .fill(isThisKeyPressed ? Color(hex: "#636366") : Color(hex: "#3A3A3C"))
@@ -1345,19 +1442,21 @@ public struct KeyboardLayoutView: View {
                             totalColumns: totalColumns
                         )
                         .offset(y: isIPad ? -58 : -54)
-                    } else {
+                    } else if !isIPad {
+                        // Sur iPad grand écran, Apple n'affiche pas la loupe géante sur chaque lettre
                         appleSingleKeyMagnifierCallout(label: displayedChar)
-                            .offset(y: isIPad ? -54 : -50)
+                            .offset(y: -50)
                     }
                 }
             }
             .zIndex(isThisKeyPressed ? 100 : 1)
             .contentShape(Rectangle())
             .modifier(KeyTouchGesture(
-                onChanged: { value in
-                    if pressedKeyID != key {
-                        beginKeyPress(key)
-                    } else if isShowingLongPressVariants && !activeVariants.isEmpty {
+                onTouchBegan: {
+                    beginKeyPress(key)
+                },
+                onTouchMoved: { value in
+                    if pressedKeyID == key && isShowingLongPressVariants && !activeVariants.isEmpty {
                         // Pas = largeur d'une variante + espacement du callout
                         let stepWidth: CGFloat = isIPad ? 38.0 : 33.0
                         let deltaSteps = Int(round(value.translation.width / stepWidth))
@@ -1369,13 +1468,11 @@ public struct KeyboardLayoutView: View {
                         }
                     }
                 },
-                onEnded: {
+                onTouchEnded: {
                     endKeyPress(key)
                 },
-                onCancelled: {
-                    if pressedKeyID == key {
-                        cancelKeyPress()
-                    }
+                onTouchCancelled: {
+                    handleCancelledKeyPress(key)
                 }
             ))
     }
@@ -1448,7 +1545,16 @@ public struct KeyboardLayoutView: View {
 
     private func beginKeyPress(_ key: String) {
         longPressTimer?.invalidate()
+
+        // Rollover bi-manuel sur iPad : si une première touche était encore enfoncée
+        // (hors menu d'accents) au moment où le second doigt touche une nouvelle lettre,
+        // on valide immédiatement la première lettre dans l'ordre chronologique exact.
+        if let previousKey = pressedKeyID, previousKey != key, !isShowingLongPressVariants {
+            commitKeyCharacter(displayStringForKey(previousKey))
+        }
+
         pressedKeyID = key
+        keyPressStartTime = Date()
         isShowingLongPressVariants = false
         selectedVariantIndex = 0
         triggerLightHaptic()
@@ -1479,29 +1585,42 @@ public struct KeyboardLayoutView: View {
         selectedVariantIndex = 0
     }
 
-    private func endKeyPress(_ key: String) {
-        // Frappe à deux mains : une autre touche peut déjà être la touche active
-        let isActiveKey = (pressedKeyID == key)
-        if isActiveKey {
-            longPressTimer?.invalidate()
-            longPressTimer = nil
+    private func handleCancelledKeyPress(_ key: String) {
+        guard pressedKeyID == key else { return }
+        // Si iPadOS annule un toucher court (< 0.35s) à cause du multitouch ou de la paume,
+        // on valide la lettre au lieu de la perdre silencieusement.
+        if !isShowingLongPressVariants && Date().timeIntervalSince(keyPressStartTime) < 0.35 {
+            endKeyPress(key)
+        } else {
+            cancelKeyPress()
         }
+    }
+
+    private func endKeyPress(_ key: String) {
+        // Si la touche a déjà été validée par rollover bi-manuel lorsqu'un second doigt a frappé une autre touche,
+        // on ne l'insère pas une seconde fois au relâchement.
+        guard pressedKeyID == key else { return }
+
+        longPressTimer?.invalidate()
+        longPressTimer = nil
 
         let textToInsert: String
-        if isActiveKey && isShowingLongPressVariants && !activeVariants.isEmpty {
+        if isShowingLongPressVariants && !activeVariants.isEmpty {
             let safeIdx = max(0, min(activeVariants.count - 1, selectedVariantIndex))
             textToInsert = activeVariants[safeIdx]
         } else {
             textToInsert = displayStringForKey(key)
         }
 
-        if isActiveKey {
-            pressedKeyID = nil
-            isShowingLongPressVariants = false
-            activeVariants = []
-            selectedVariantIndex = 0
-        }
+        pressedKeyID = nil
+        isShowingLongPressVariants = false
+        activeVariants = []
+        selectedVariantIndex = 0
 
+        commitKeyCharacter(textToInsert)
+    }
+
+    private func commitKeyCharacter(_ textToInsert: String) {
         appGroup.clearLastInsertedSentenceLength()
         onInsertText(textToInsert)
         localTypedContextBuffer += textToInsert
@@ -1529,7 +1648,7 @@ public struct KeyboardLayoutView: View {
                 Text(currentLayer == .letters ? "123" : "ABC")
                     .font(.system(size: isIPad ? 16 : 15, weight: .regular))
                     .foregroundColor(.white)
-                    .frame(width: isIPad ? 62 : 42, height: isIPad ? 45 : 42)
+                    .frame(width: isIPad ? 62 : 42, height: keyRowHeight)
                     .background(
                         RoundedRectangle(cornerRadius: 5.0, style: .continuous)
                             .fill(Color(hex: "#48484A"))
@@ -1546,7 +1665,7 @@ public struct KeyboardLayoutView: View {
                 Image(systemName: "face.smiling")
                     .font(.system(size: isIPad ? 19 : 18, weight: .regular))
                     .foregroundColor(.white)
-                    .frame(width: isIPad ? 48 : 38, height: isIPad ? 45 : 42)
+                    .frame(width: isIPad ? 48 : 38, height: keyRowHeight)
                     .background(
                         RoundedRectangle(cornerRadius: 5.0, style: .continuous)
                             .fill(Color(hex: "#48484A"))
@@ -1563,7 +1682,7 @@ public struct KeyboardLayoutView: View {
                 Image(systemName: "globe")
                     .font(.system(size: isIPad ? 18 : 17, weight: .regular))
                     .foregroundColor(.white)
-                    .frame(width: isIPad ? 48 : 38, height: isIPad ? 45 : 42)
+                    .frame(width: isIPad ? 48 : 38, height: keyRowHeight)
                     .background(
                         RoundedRectangle(cornerRadius: 5.0, style: .continuous)
                             .fill(Color(hex: "#48484A"))
@@ -1580,7 +1699,7 @@ public struct KeyboardLayoutView: View {
                     .font(.system(size: isIPad ? 16 : 15, weight: .regular))
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
-                    .frame(height: isIPad ? 45 : 42)
+                    .frame(height: keyRowHeight)
                     .background(
                         RoundedRectangle(cornerRadius: 5.0, style: .continuous)
                             .fill(Color(hex: "#3A3A3C"))
@@ -1604,7 +1723,7 @@ public struct KeyboardLayoutView: View {
                 Text(returnKeyLabel)
                     .font(.system(size: isIPad ? 16 : 15, weight: .regular))
                     .foregroundColor(.white)
-                    .frame(width: isIPad ? 96 : 80, height: isIPad ? 45 : 42)
+                    .frame(width: isIPad ? 96 : 80, height: keyRowHeight)
                     .background(
                         RoundedRectangle(cornerRadius: 5.0, style: .continuous)
                             .fill(Color(hex: "#48484A"))
@@ -1622,7 +1741,7 @@ public struct KeyboardLayoutView: View {
                     Image(systemName: "keyboard.chevron.compact.down")
                         .font(.system(size: 17, weight: .regular))
                         .foregroundColor(.white)
-                        .frame(width: 58, height: 45)
+                        .frame(width: 58, height: keyRowHeight)
                         .background(
                             RoundedRectangle(cornerRadius: 5.0, style: .continuous)
                                 .fill(Color(hex: "#48484A"))
@@ -1747,7 +1866,9 @@ public struct KeyboardLayoutView: View {
         refreshAutocorrectSuggestions(preferLocalBuffer: true)
 
         backspaceRepeatTimer?.invalidate()
-        // Délai initial : un appui normal n'efface qu'un seul caractère
+        // Délai initial : un appui normal n'efface qu'un seul caractère.
+        // Pendant la répétition rapide (75 ms), on n'appelle pas UITextChecker à chaque tick
+        // pour éviter de bloquer le thread principal : la mise à jour se fait au relâchement.
         let timer = Timer(fire: Date().addingTimeInterval(0.4), interval: 0.075, repeats: true) { _ in
             guard isHoldingBackspace else {
                 stopBackspaceRepeat()
@@ -1758,16 +1879,19 @@ public struct KeyboardLayoutView: View {
                 localTypedContextBuffer.removeLast()
             }
             lastLocalEditTime = Date()
-            refreshAutocorrectSuggestions(preferLocalBuffer: true)
         }
         RunLoop.main.add(timer, forMode: .common)
         backspaceRepeatTimer = timer
     }
 
     private func stopBackspaceRepeat() {
+        let wasHolding = isHoldingBackspace
         isHoldingBackspace = false
         backspaceRepeatTimer?.invalidate()
         backspaceRepeatTimer = nil
+        if wasHolding {
+            refreshAutocorrectSuggestions(preferLocalBuffer: false)
+        }
     }
 
     private var shiftKeyBackgroundColor: Color {
@@ -1784,12 +1908,22 @@ public struct KeyboardLayoutView: View {
         return Color.white
     }
 
+    private static let sharedLightHapticGenerator = UIImpactFeedbackGenerator(style: .light)
+    private static var lastSystemClickTimestamp: TimeInterval = 0
+
     private func triggerLightHaptic() {
-        let generator = UIImpactFeedbackGenerator(style: .light)
-        generator.impactOccurred()
-        // Les iPad n'ont pas de moteur haptique : le clic sonore est le seul retour de frappe
         if UIDevice.current.userInterfaceIdiom == .pad {
-            AudioServicesPlaySystemSound(1104)
+            // Sur iPad (dépourvu de Taptic Engine), on évite absolument de jouer le clic système 1104
+            // lorsque le moteur vocal Whisper écoute ou tourne en tâche de fond (cela pollue le micro
+            // et provoque une contention XPC AudioToolbox avec la session AVAudioEngine 16 kHz).
+            guard !appGroup.isBackgroundEngineActive && appGroup.orbState == .idle else { return }
+            let now = Date().timeIntervalSince1970
+            if now - Self.lastSystemClickTimestamp >= 0.055 {
+                Self.lastSystemClickTimestamp = now
+                AudioServicesPlaySystemSound(1104)
+            }
+        } else {
+            Self.sharedLightHapticGenerator.impactOccurred()
         }
     }
 }

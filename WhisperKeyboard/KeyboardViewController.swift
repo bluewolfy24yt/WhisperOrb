@@ -10,6 +10,7 @@ public final class KeyboardViewController: UIInputViewController {
     private var cancellables = Set<AnyCancellable>()
     private var isKeyboardVisible = false
     private var lastDictatedText = ""
+    private var lastKnownWidth: CGFloat = 0
 
     private var currentFieldTraits: KeyboardFieldTraits {
         let proxy = textDocumentProxy
@@ -22,13 +23,20 @@ public final class KeyboardViewController: UIInputViewController {
     }
 
     private var desiredKeyboardHeight: CGFloat {
-        // La largeur réelle compte : en Slide Over ou flottant, le clavier d'un iPad est étroit
+        // La largeur réelle compte : sur iPad, le clavier peut être plein écran (≥ 500 pt),
+        // en Slide Over (~320-375 pt) ou en mode Clavier Flottant iPadOS (< 450 pt, plafonné à ~254 pt par le système).
         let width = view.bounds.width
-        let isPad = UIDevice.current.userInterfaceIdiom == .pad && (width == 0 || width >= 500)
+        let isPadIdiom = UIDevice.current.userInterfaceIdiom == .pad
+        let isWidePad = isPadIdiom && (width == 0 || width >= 500)
+        let isFloatingPad = isPadIdiom && width > 0 && width < 450
         if AppGroupManager.shared.isKeyboardCollapsed {
-            return isPad ? 68.0 : 62.0
+            if isFloatingPad { return 56.0 }
+            return isWidePad ? 68.0 : 62.0
         }
-        return isPad ? 328.0 : 286.0
+        if isFloatingPad {
+            return 248.0
+        }
+        return isWidePad ? 328.0 : 286.0
     }
 
     public override func viewDidLoad() {
@@ -63,9 +71,13 @@ public final class KeyboardViewController: UIInputViewController {
         NotificationCenter.default.post(name: Self.textDidChangeNotification, object: nil)
     }
 
-    public override func viewWillLayoutSubviews() {
-        super.viewWillLayoutSubviews()
-        updateKeyboardHeightConstraint()
+    public override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        let currentWidth = view.bounds.width
+        if abs(currentWidth - lastKnownWidth) > 0.5 {
+            lastKnownWidth = currentWidth
+            updateKeyboardHeightConstraint()
+        }
     }
 
     // MARK: - Montage UIHostingController + Contraintes AutoLayout (320 pt iPad / 275 pt iPhone)
@@ -162,7 +174,7 @@ public final class KeyboardViewController: UIInputViewController {
 
     private func processPendingActionsIfNeeded() {
         // Clavier masqué : le texte attend son retour au lieu de partir dans le vide
-        guard isKeyboardVisible else { return }
+        guard isKeyboardVisible || view.window != nil else { return }
 
         // 1. Suppression de la dernière phrase dictée si demandée (par commande vocale ou bouton)
         if let deleteCount = AppGroupManager.shared.consumeDeleteLastSentenceLength(), deleteCount > 0 {
@@ -170,10 +182,21 @@ public final class KeyboardViewController: UIInputViewController {
         }
 
         // 2. Insertion du texte fraîchement transcrit par Whisper
-        if let textToInsert = AppGroupManager.shared.consumePendingTranscribedText(), !textToInsert.isEmpty {
-            textDocumentProxy.insertText(textToInsert)
-            lastDictatedText = textToInsert
-            NotificationCenter.default.post(name: Self.textDidChangeNotification, object: nil)
+        if let rawTextToInsert = AppGroupManager.shared.consumePendingTranscribedText(), !rawTextToInsert.isEmpty {
+            let contextBefore = textDocumentProxy.documentContextBeforeInput ?? ""
+            let needsLeadingSpace: Bool = {
+                guard let lastChar = contextBefore.last, let firstNew = rawTextToInsert.first else { return false }
+                if lastChar.isWhitespace || lastChar.isNewline { return false }
+                if ["'", "’", "(", "[", "{", "«", "/", "-"].contains(String(lastChar)) { return false }
+                return firstNew.isLetter || firstNew.isNumber
+            }()
+            let finalInsert = needsLeadingSpace ? (" " + rawTextToInsert) : rawTextToInsert
+            textDocumentProxy.insertText(finalInsert)
+            lastDictatedText = finalInsert
+            if needsLeadingSpace {
+                AppGroupManager.shared.lastInsertedSentenceLength = finalInsert.count
+            }
+            NotificationCenter.default.post(name: Self.textDidChangeNotification, object: finalInsert)
         }
     }
 

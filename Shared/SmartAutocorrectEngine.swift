@@ -343,6 +343,9 @@ public final class SmartAutocorrectEngine {
 
     private init() {}
 
+    private var lastCacheKey: String = ""
+    private var lastCachedSuggestionSet: AutocorrectSuggestionSet? = nil
+
     // MARK: - Calcul Principal des 3 Suggestions & Décision d'Autocorrection
 
     public func computeSuggestions(
@@ -351,6 +354,21 @@ public final class SmartAutocorrectEngine {
     ) -> AutocorrectSuggestionSet {
         let lang = normalizeLang(languageCode)
         let (previousWord, currentPrefix) = extractLastTwoTokens(from: contextBeforeCursor)
+        let cacheKey = "\(lang)|\(UserStyleMemoryManager.shared.isMemoryEnabled)|\(previousWord)|\(currentPrefix)"
+        if cacheKey == lastCacheKey, let cached = lastCachedSuggestionSet {
+            return cached
+        }
+        let computed = computeSuggestionsInternal(previousWord: previousWord, currentPrefix: currentPrefix, lang: lang)
+        lastCacheKey = cacheKey
+        lastCachedSuggestionSet = computed
+        return computed
+    }
+
+    private func computeSuggestionsInternal(
+        previousWord: String,
+        currentPrefix: String,
+        lang: String
+    ) -> AutocorrectSuggestionSet {
 
         // Cas 1 : L'utilisateur vient de taper un espace ou le champ est vide -> Prédiction du mot suivant
         if currentPrefix.isEmpty {
@@ -739,16 +757,39 @@ public final class SmartAutocorrectEngine {
 
     public func extractLastTwoTokens(from text: String) -> (previousWord: String, currentPrefix: String) {
         guard !text.isEmpty else { return ("", "") }
-        if let lastChar = text.last, lastChar.isWhitespace || ".,!?;:\n".contains(lastChar) {
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            let tokens = trimmed.components(separatedBy: .whitespacesAndNewlines)
-            let prev = tokens.last?.trimmingCharacters(in: .punctuationCharacters) ?? ""
+
+        func isWordCharacter(_ c: Character) -> Bool {
+            c.isLetter || c.isNumber || c == "'" || c == "’" || c == "-"
+        }
+
+        // Si le curseur est juste après un espace ou une ponctuation séparatrice -> prédiction du mot suivant
+        guard let lastChar = text.last, isWordCharacter(lastChar), lastChar != "-" else {
+            let tokens = text.split { !isWordCharacter($0) }
+            let prev = tokens.last.map(String.init)?.trimmingCharacters(in: CharacterSet(charactersIn: "'-’")) ?? ""
             return (prev, "")
         }
-        let parts = text.components(separatedBy: .whitespacesAndNewlines)
-        let current = parts.last ?? ""
-        let prev = parts.dropLast().last?.trimmingCharacters(in: .punctuationCharacters) ?? ""
-        return (prev, current)
+
+        // Extrait uniquement le mot en cours juste avant le curseur (sans parenthèse, virgule ou guillemet collé)
+        var currentEnd = text.endIndex
+        var idx = text.index(before: currentEnd)
+        while true {
+            let ch = text[idx]
+            if !isWordCharacter(ch) {
+                currentEnd = text.index(after: idx)
+                break
+            }
+            if idx == text.startIndex {
+                currentEnd = text.startIndex
+                break
+            }
+            idx = text.index(before: idx)
+        }
+
+        let rawCurrent = String(text[currentEnd...]).trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        let prefixBeforeCurrent = String(text[..<currentEnd])
+        let prevTokens = prefixBeforeCurrent.split { !isWordCharacter($0) }
+        let prev = prevTokens.last.map(String.init)?.trimmingCharacters(in: CharacterSet(charactersIn: "'-’")) ?? ""
+        return (prev, rawCurrent)
     }
 
     private func normalizeLang(_ code: String) -> String {

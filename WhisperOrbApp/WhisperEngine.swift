@@ -40,7 +40,7 @@ public final class WhisperEngine: ObservableObject {
     private var accumulatedSamples16kHz: [Float] = []
     // Copies protégées par audioBufferLock : le thread audio ne lit jamais AppGroupManager
     private var isCaptureEnabled: Bool = false
-    private var vadSilenceSeconds: Double = 1.0
+    private var vadSilenceSeconds: Double = 1.45
 
     // MARK: - Détecteur d'Activité Vocale (VAD) & Lissage RMS
 
@@ -49,8 +49,10 @@ public final class WhisperEngine: ObservableObject {
     private var activeSpeechDurationSeconds: Double = 0.0
     private var currentSilenceDurationSeconds: Double = 0.0
     private var hasSpokenEnoughInCurrentUtterance: Bool = false
+    private var recentRMSWindow: [Float] = []
     private var isTranscribingNow: Bool = false
     private var lastHeartbeatTime: TimeInterval = 0
+    private var heartbeatTimer: Timer? = nil
     private var cancellables = Set<AnyCancellable>()
 
     // MARK: - Initialisation
@@ -63,6 +65,7 @@ public final class WhisperEngine: ObservableObject {
     }
 
     deinit {
+        heartbeatTimer?.invalidate()
         if let ctx = whisperContext {
             whisper_free(ctx)
             whisperContext = nil
@@ -224,24 +227,17 @@ public final class WhisperEngine: ObservableObject {
 
     // MARK: - 1. Gestion Stricte de la RAM & Initialisation GPU Metal + FlashAttention
 
-    /// iOS interdit le GPU aux apps en arrière-plan : le modèle bascule sur CPU quand l'app y passe,
-    /// et revient sur Metal si elle reste au premier plan.
+    /// Maintient le backend d'inférence prêt sans provoquer de rechargement bloquant lors du passage au clavier.
     public func prepareInferenceBackend(forBackground: Bool) {
-        guard let tier = loadedTier, !isLoadingModel else { return }
+        guard let tier = loadedTier, !isLoadingModel, !isTranscribingNow else { return }
         if forBackground {
-            guard isGPUBackendLoaded else { return }
+            guard isGPUBackendLoaded, !HardwareDetector.isRunningOnMac else { return }
             loadModel(tier, reloadBackend: true, forceCPU: true)
             return
         }
-        guard !isGPUBackendLoaded else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-            guard let self = self,
-                  UIApplication.shared.applicationState == .active,
-                  AppGroupManager.shared.orbState == .idle,
-                  !self.isGPUBackendLoaded,
-                  !self.isLoadingModel,
-                  self.loadedTier == tier else { return }
-            self.loadModel(tier, reloadBackend: true)
+        // Si le modèle a été libéré par une alerte mémoire en arrière-plan, on le recharge au retour
+        if whisperContext == nil {
+            loadModel(tier, reloadBackend: true)
         }
     }
 
@@ -298,7 +294,9 @@ public final class WhisperEngine: ObservableObject {
         let resolvedLang = currentLangSelection.resolvedWhisperCode
         let promptSeed = currentLangSelection.initialPunctuationPrompt
         let isConstrainedRAM = HardwareDetector.physicalMemoryGB < 5.5 || appGroup.simulateModest4GBDevice
-        let cpuOnly = forceCPU || UIApplication.shared.applicationState == .background
+        // Sur iOS/iPadOS, la dictée clavier s'exécute quand l'app est en arrière-plan (où iOS interdit Metal GPU).
+        // Utiliser directement Apple Accelerate AMX évite tout rechargement bloquant lors du passage au clavier.
+        let cpuOnly = forceCPU || !HardwareDetector.isRunningOnMac || UIApplication.shared.applicationState == .background
 
         inferenceQueue.async { [weak self] in
             guard let self = self else { return }
@@ -424,13 +422,13 @@ public final class WhisperEngine: ObservableObject {
         wparams.suppress_blank = true
         wparams.suppress_nst = true
         wparams.temperature = 0.0
-        wparams.temperature_inc = 0.0
+        wparams.temperature_inc = 0.2
         wparams.greedy.best_of = 1
         wparams.max_tokens = 0 // pas de plafond : 28 s de parole peuvent dépasser 96 tokens
         wparams.n_max_text_ctx = 32
         wparams.initial_prompt = nil
 
-        let neededCtx = Int(ceil(audioDurationSeconds * 50.0)) + 12
+        let neededCtx = Int(ceil(audioDurationSeconds * 50.0)) + 64
         let alignedCtx = ((neededCtx + 31) / 32) * 32
         wparams.audio_ctx = Int32(max(64, min(1500, alignedCtx)))
 
@@ -523,6 +521,7 @@ public final class WhisperEngine: ObservableObject {
 
             lastHeartbeatTime = Date().timeIntervalSince1970
             AppGroupManager.shared.recordEngineHeartbeat()
+            startHeartbeatTimer()
             isBackgroundEngineRunning = true
             AppGroupManager.shared.isBackgroundEngineActive = true
             statusBannerMessage = "Moteur Audio Tâche de Fond ACTIF — Prêt à dicter depuis le clavier"
@@ -530,13 +529,30 @@ public final class WhisperEngine: ObservableObject {
         } catch {
             lastErrorMessage = "Erreur d'activation audio : \(error.localizedDescription)"
             statusBannerMessage = "Échec du démarrage audio"
+            stopHeartbeatTimer()
             isBackgroundEngineRunning = false
             AppGroupManager.shared.clearEngineHeartbeat()
             AppGroupManager.shared.isBackgroundEngineActive = false
         }
     }
 
+    private func startHeartbeatTimer() {
+        heartbeatTimer?.invalidate()
+        let timer = Timer(timeInterval: 2.5, repeats: true) { [weak self] _ in
+            guard let self = self, self.isBackgroundEngineRunning else { return }
+            AppGroupManager.shared.recordEngineHeartbeat()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        heartbeatTimer = timer
+    }
+
+    private func stopHeartbeatTimer() {
+        heartbeatTimer?.invalidate()
+        heartbeatTimer = nil
+    }
+
     public func stopBackgroundAudioEngine() {
+        stopHeartbeatTimer()
         if audioEngine.isRunning {
             audioEngine.inputNode.removeTap(onBus: 0)
             audioEngine.stop()
@@ -613,6 +629,7 @@ public final class WhisperEngine: ObservableObject {
         activeSpeechDurationSeconds = 0.0
         currentSilenceDurationSeconds = 0.0
         hasSpokenEnoughInCurrentUtterance = false
+        recentRMSWindow.removeAll(keepingCapacity: true)
         audioBufferLock.unlock()
 
         appGroup.recordEngineHeartbeat()
@@ -642,6 +659,22 @@ public final class WhisperEngine: ObservableObject {
         }
 
         runWhisperTranscription(on: capturedFrames)
+    }
+
+    private func cancelSilentListeningSession() {
+        guard AppGroupManager.shared.orbState == .listening, !isTranscribingNow else { return }
+
+        audioBufferLock.lock()
+        accumulatedSamples16kHz.removeAll(keepingCapacity: true)
+        activeSpeechDurationSeconds = 0.0
+        currentSilenceDurationSeconds = 0.0
+        hasSpokenEnoughInCurrentUtterance = false
+        audioBufferLock.unlock()
+
+        resumeListeningAfterTranscription = false
+        AppGroupManager.shared.updateLiveAudioLevel(0.0)
+        AppGroupManager.shared.orbState = .idle
+        statusBannerMessage = "Aucune parole détectée • Prêt"
     }
 
     // MARK: - 4. Conversion Temps Réel vers 16000 Hz Mono Float32, Calcul RMS & VAD
@@ -681,15 +714,24 @@ public final class WhisperEngine: ObservableObject {
         AppGroupManager.shared.updateLiveAudioLevel(smoothedLevel)
 
         let chunkDurationSeconds = Double(sampleCount) / targetSampleRate
-        let vadSilenceLimit = max(0.45, min(2.5, configuredSilenceSeconds))
+        let vadSilenceLimit = max(0.55, min(3.0, configuredSilenceSeconds))
 
         var shouldTriggerAutoTranscribe = false
         var reachedMaxDuration = false
+        var shouldCancelSilentSession = false
 
         audioBufferLock.lock()
         accumulatedSamples16kHz.append(contentsOf: monoSamples16kHz)
 
-        if rms >= speechRMSThreshold {
+        recentRMSWindow.append(rms)
+        let windowCapacity = max(8, Int(2.0 / max(0.005, chunkDurationSeconds)))
+        if recentRMSWindow.count > windowCapacity {
+            recentRMSWindow.removeFirst(recentRMSWindow.count - windowCapacity)
+        }
+        let noiseFloor = recentRMSWindow.min() ?? rms
+        let adaptiveSpeechThreshold = min(speechRMSThreshold, max(0.004, noiseFloor * 3.0))
+
+        if rms >= adaptiveSpeechThreshold {
             activeSpeechDurationSeconds += chunkDurationSeconds
             currentSilenceDurationSeconds = 0.0
             if activeSpeechDurationSeconds >= 0.35 {
@@ -705,7 +747,9 @@ public final class WhisperEngine: ObservableObject {
         }
 
         let totalRecordedSeconds = Double(accumulatedSamples16kHz.count) / targetSampleRate
-        if totalRecordedSeconds >= 28.0 {
+        if !hasSpokenEnoughInCurrentUtterance && activeSpeechDurationSeconds < 0.35 && totalRecordedSeconds >= 12.0 {
+            shouldCancelSilentSession = true
+        } else if totalRecordedSeconds >= 28.0 {
             shouldTriggerAutoTranscribe = true
             reachedMaxDuration = true
         }
@@ -715,7 +759,11 @@ public final class WhisperEngine: ObservableObject {
         }
         audioBufferLock.unlock()
 
-        if shouldTriggerAutoTranscribe {
+        if shouldCancelSilentSession {
+            DispatchQueue.main.async { [weak self] in
+                self?.cancelSilentListeningSession()
+            }
+        } else if shouldTriggerAutoTranscribe {
             DispatchQueue.main.async { [weak self] in
                 self?.resumeListeningAfterTranscription = reachedMaxDuration
                 self?.finishListeningAndTranscribe()
