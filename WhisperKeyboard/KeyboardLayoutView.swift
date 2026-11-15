@@ -425,14 +425,19 @@ public struct KeyboardLayoutView: View {
         self.hasFullAccessProvider = hasFullAccessProvider
     }
 
-    // Disposition « grand écran » seulement si le clavier est réellement large
-    private var isIPad: Bool {
-        UIDevice.current.userInterfaceIdiom == .pad && (containerWidth == 0 || containerWidth >= 500)
-    }
-
-    // Mode Clavier Flottant iPadOS (fenêtre pincée < 450 pt, hauteur plafonnée par iPadOS à ~254 pt)
+    // Mode Clavier Flottant / Slide Over étroit iPadOS (< 450 pt, hauteur plafonnée par iPadOS à ~254 pt)
     private var isFloatingIPad: Bool {
         UIDevice.current.userInterfaceIdiom == .pad && containerWidth > 0 && containerWidth < 450
+    }
+
+    // Disposition iPad standard / Split View / Stage Manager (≥ 450 pt)
+    private var isIPad: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad && !isFloatingIPad
+    }
+
+    // Mode iPad Split View intermédiaire (450–540 pt) : touches modificatrices légèrement affinées
+    private var isCompactIPad: Bool {
+        isIPad && containerWidth > 0 && containerWidth < 540
     }
 
     private var keyRowHeight: CGFloat {
@@ -947,21 +952,25 @@ public struct KeyboardLayoutView: View {
     private func handleVoiceDictationTrigger() {
         let generator = UIImpactFeedbackGenerator(style: .medium)
         generator.impactOccurred()
-        // L'orbe n'ouvre jamais l'app : si le moteur est arrêté, la pastille d'état l'indique
-        guard hasFullAccessProvider() else { return }
-        appGroup.reloadStateFromChannels()
-        appGroup.requestToggleRecordingFromKeyboard()
+        if !hasFullAccessProvider() {
+            onOpenParentApp()
+            return
+        }
+        appGroup.triggerDictationOrWakeApp {
+            onOpenParentApp()
+        }
     }
 
-    /// Seul geste qui ouvre l'app, et uniquement quand le micro doit être activé.
+    /// Ouvre l'application si l'accès complet, le micro ou le modèle IA doivent être initialisés, sinon lance la dictée.
     private func handleStatusCapsuleTap() {
-        appGroup.reloadStateFromChannels()
-        let engineIsOff = !appGroup.isBackgroundEngineActive && appGroup.orbState == .idle
-        if !hasFullAccessProvider() || engineIsOff {
+        if !hasFullAccessProvider() {
             triggerLightHaptic()
             onOpenParentApp()
-        } else {
-            handleVoiceDictationTrigger()
+            return
+        }
+        triggerLightHaptic()
+        appGroup.triggerDictationOrWakeApp {
+            onOpenParentApp()
         }
     }
 
@@ -971,6 +980,9 @@ public struct KeyboardLayoutView: View {
         }
         if !appGroup.isBackgroundEngineActive && appGroup.orbState == .idle {
             return "Ouvrir WhisperOrb (Micro)"
+        }
+        if !appGroup.hasAnyModelReady && appGroup.downloadedModelRaws.isEmpty {
+            return "Téléchargement IA en cours..."
         }
         switch appGroup.orbState {
         case .idle:
@@ -987,7 +999,10 @@ public struct KeyboardLayoutView: View {
             return isIPad ? "Activez l'accès complet dans Réglages" : "Accès complet requis"
         }
         if !appGroup.isBackgroundEngineActive && appGroup.orbState == .idle {
-            return isIPad ? "Touchez ici pour activer le micro" : "Activer le micro"
+            return isIPad ? "Touchez l'orbe pour activer le micro" : "Activer le micro"
+        }
+        if !appGroup.hasAnyModelReady && appGroup.downloadedModelRaws.isEmpty {
+            return isIPad ? "Téléchargement auto du modèle IA..." : "Téléchargement IA..."
         }
         switch appGroup.orbState {
         case .idle:
@@ -1000,7 +1015,8 @@ public struct KeyboardLayoutView: View {
     }
 
     private var statusIndicatorColor: Color {
-        if !appGroup.isBackgroundEngineActive && appGroup.orbState == .idle {
+        if (!appGroup.isBackgroundEngineActive && appGroup.orbState == .idle)
+            || (!appGroup.hasAnyModelReady && appGroup.downloadedModelRaws.isEmpty) {
             return Color(hex: "#FF9F0A")
         }
         switch appGroup.orbState {
@@ -1102,17 +1118,22 @@ public struct KeyboardLayoutView: View {
         let safeReplaceCount = min(max(0, replaceCount), effectiveContext.count)
 
         if safeReplaceCount > 0 {
-            let typedWord = String(effectiveContext.suffix(safeReplaceCount))
-            // On conserve le préfixe commun exact entre le mot déjà écrit et la suggestion
-            // afin de réduire au minimum les appels à deleteBackward() (évite les doublons dans les WebViews iPad).
+            let rawTypedWord = String(effectiveContext.suffix(safeReplaceCount))
+            let normalizedCandidate = candidate.precomposedStringWithCanonicalMapping
+            // Si le champ texte (ex: WebView Safari/Notion) utilise des accents Unicode décomposés (NFD),
+            // on remplace le mot entier pour éviter tout décalage d'un scalar sur deleteBackward().
+            let hasDecomposedScalars = rawTypedWord.unicodeScalars.count != rawTypedWord.count
+
             var commonPrefixCount = 0
-            var typedIter = typedWord.makeIterator()
-            var candIter = candidate.makeIterator()
-            while let tChar = typedIter.next(), let cChar = candIter.next(), tChar == cChar {
-                commonPrefixCount += 1
+            if !hasDecomposedScalars {
+                var typedIter = rawTypedWord.makeIterator()
+                var candIter = normalizedCandidate.makeIterator()
+                while let tChar = typedIter.next(), let cChar = candIter.next(), tChar == cChar {
+                    commonPrefixCount += 1
+                }
             }
 
-            let deletesNeeded = max(0, typedWord.count - commonPrefixCount)
+            let deletesNeeded = max(0, rawTypedWord.count - commonPrefixCount)
             for _ in 0..<deletesNeeded {
                 onDeleteBackward()
             }
@@ -1122,7 +1143,7 @@ public struct KeyboardLayoutView: View {
                 localTypedContextBuffer = ""
             }
 
-            let suffixToInsert = String(candidate.dropFirst(commonPrefixCount)) + " "
+            let suffixToInsert = String(normalizedCandidate.dropFirst(commonPrefixCount)) + " "
             onInsertText(suffixToInsert)
             localTypedContextBuffer += suffixToInsert
         } else {
@@ -1366,7 +1387,7 @@ public struct KeyboardLayoutView: View {
                     }
                 }
                 .foregroundColor(shiftKeyForegroundColor)
-                .frame(width: isIPad ? 58 : 42, height: keyRowHeight)
+                .frame(width: isIPad ? (isCompactIPad ? 46 : 58) : 42, height: keyRowHeight)
                 .background(
                     RoundedRectangle(cornerRadius: 5.0, style: .continuous)
                         .fill(shiftKeyBackgroundColor)
@@ -1375,9 +1396,9 @@ public struct KeyboardLayoutView: View {
             }
             .buttonStyle(.plain)
 
-            Spacer(minLength: isIPad ? 8 : 3)
+            Spacer(minLength: isIPad ? (isCompactIPad ? 4 : 8) : 3)
 
-            HStack(spacing: isIPad ? 7 : 6) {
+            HStack(spacing: isIPad ? (isCompactIPad ? 5 : 7) : 6) {
                 ForEach(Array(activeRow3Keys.enumerated()), id: \.element) { idx, key in
                     appleInteractiveCharacterKey(
                         key: key,
@@ -1387,12 +1408,12 @@ public struct KeyboardLayoutView: View {
                 }
             }
 
-            Spacer(minLength: isIPad ? 8 : 3)
+            Spacer(minLength: isIPad ? (isCompactIPad ? 4 : 8) : 3)
 
             Image(systemName: isHoldingBackspace ? "delete.left.fill" : "delete.left")
                 .font(.system(size: isIPad ? 18 : 16, weight: .regular))
                 .foregroundColor(.white)
-                .frame(width: isIPad ? 58 : 42, height: keyRowHeight)
+                .frame(width: isIPad ? (isCompactIPad ? 46 : 58) : 42, height: keyRowHeight)
                 .background(
                     RoundedRectangle(cornerRadius: 5.0, style: .continuous)
                         .fill(isHoldingBackspace ? Color(hex: "#636366") : Color(hex: "#48484A"))
@@ -1648,7 +1669,7 @@ public struct KeyboardLayoutView: View {
                 Text(currentLayer == .letters ? "123" : "ABC")
                     .font(.system(size: isIPad ? 16 : 15, weight: .regular))
                     .foregroundColor(.white)
-                    .frame(width: isIPad ? 62 : 42, height: keyRowHeight)
+                    .frame(width: isIPad ? (isCompactIPad ? 50 : 62) : 42, height: keyRowHeight)
                     .background(
                         RoundedRectangle(cornerRadius: 5.0, style: .continuous)
                             .fill(Color(hex: "#48484A"))
@@ -1665,7 +1686,7 @@ public struct KeyboardLayoutView: View {
                 Image(systemName: "face.smiling")
                     .font(.system(size: isIPad ? 19 : 18, weight: .regular))
                     .foregroundColor(.white)
-                    .frame(width: isIPad ? 48 : 38, height: keyRowHeight)
+                    .frame(width: isIPad ? (isCompactIPad ? 42 : 48) : 38, height: keyRowHeight)
                     .background(
                         RoundedRectangle(cornerRadius: 5.0, style: .continuous)
                             .fill(Color(hex: "#48484A"))
@@ -1682,7 +1703,7 @@ public struct KeyboardLayoutView: View {
                 Image(systemName: "globe")
                     .font(.system(size: isIPad ? 18 : 17, weight: .regular))
                     .foregroundColor(.white)
-                    .frame(width: isIPad ? 48 : 38, height: keyRowHeight)
+                    .frame(width: isIPad ? (isCompactIPad ? 42 : 48) : 38, height: keyRowHeight)
                     .background(
                         RoundedRectangle(cornerRadius: 5.0, style: .continuous)
                             .fill(Color(hex: "#48484A"))
@@ -1723,7 +1744,7 @@ public struct KeyboardLayoutView: View {
                 Text(returnKeyLabel)
                     .font(.system(size: isIPad ? 16 : 15, weight: .regular))
                     .foregroundColor(.white)
-                    .frame(width: isIPad ? 96 : 80, height: keyRowHeight)
+                    .frame(width: isIPad ? (isCompactIPad ? 80 : 96) : 80, height: keyRowHeight)
                     .background(
                         RoundedRectangle(cornerRadius: 5.0, style: .continuous)
                             .fill(Color(hex: "#48484A"))
@@ -1741,7 +1762,7 @@ public struct KeyboardLayoutView: View {
                     Image(systemName: "keyboard.chevron.compact.down")
                         .font(.system(size: 17, weight: .regular))
                         .foregroundColor(.white)
-                        .frame(width: 58, height: keyRowHeight)
+                        .frame(width: isCompactIPad ? 46 : 58, height: keyRowHeight)
                         .background(
                             RoundedRectangle(cornerRadius: 5.0, style: .continuous)
                                 .fill(Color(hex: "#48484A"))
@@ -1842,13 +1863,15 @@ public struct KeyboardLayoutView: View {
             let s = currentSuggestionSet
             if appGroup.isSmartAutocorrectEnabled && fieldTraits.allowsAutoReplace && s.shouldAutoReplaceOnSpace && !s.typedWord.isEmpty {
                 applySuggestionCandidate(s.primaryCorrection, replaceCount: s.typedWord.count)
+                // Évite qu'un espace pressé juste après une correction automatique ne soit pris pour un double-espace « . »
+                lastSpaceTapTime = .distantPast
             } else {
                 onInsertText(" ")
                 localTypedContextBuffer += " "
                 lastLocalEditTime = now
                 refreshAutocorrectSuggestions(preferLocalBuffer: true)
+                lastSpaceTapTime = now
             }
-            lastSpaceTapTime = now
         }
     }
 

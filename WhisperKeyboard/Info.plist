@@ -15,9 +15,18 @@
     <key>CFBundlePackageType</key>
     <string>XPC!</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.2.1</string>
+    <string>2.3.0</string>
     <key>CFBundleVersion</key>
-    <string>4</string>
+    <string>25</string>
+    <key>ALTAppGroups</key>
+    <array>
+        <string>group.com.bluewolfy24yt.whisperorb</string>
+    </array>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
     <key>NSExtension</key>
     <dict>
         <key>NSExtensionAttributes</key>

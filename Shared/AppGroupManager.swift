@@ -744,6 +744,7 @@ public struct WhisperSharedStatePayload: Codable, Equatable {
     public var isKeyboardCollapsed: Bool?
     public var isSmartAutocorrectEnabled: Bool?
     public var downloadedModelRaws: [String]?
+    public var hasAnyModelReady: Bool?
     public var toggleRecordingRequestCount: Int?
     public var toggleRequestedAt: TimeInterval?
     public var updatedAt: TimeInterval
@@ -794,7 +795,8 @@ public final class AppGroupManager: ObservableObject {
     public static let heartbeatPasteboardName = UIPasteboard.Name("com.bluewolfy24yt.whisperorb.heartbeat")
     private static let keychainIPCService = "com.bluewolfy24yt.whisperorb.ipc"
 
-    /// Résout le groupe Keychain partagé (<TeamID>.com.bluewolfy24yt.whisperorb) entre l'app et le clavier
+    /// Résout le groupe Keychain partagé (<TeamID>.com.bluewolfy24yt.whisperorb) entre l'app et le clavier.
+    /// Retourne `nil` si le profil de sideloading interdit l'accès inter-processus (`errSecMissingEntitlement`).
     private static let resolvedSharedKeychainAccessGroup: String? = {
         let probeAccount = "whisperorb.teamid.probe"
         let query: [String: Any] = [
@@ -813,76 +815,71 @@ public final class AppGroupManager: ObservableObject {
               let currentGroup = attrs[kSecAttrAccessGroup as String] as? String else {
             return nil
         }
-        // Si on est dans l'extension (.keyboard), le groupe de l'app parente est sans le suffixe .keyboard
+
+        let candidateGroup: String
         if currentGroup.hasSuffix(".keyboard") {
-            return String(currentGroup.dropLast(".keyboard".count))
+            candidateGroup = String(currentGroup.dropLast(".keyboard".count))
         } else if currentGroup.hasSuffix(".WhisperKeyboard") {
-            return String(currentGroup.dropLast(".WhisperKeyboard".count))
+            candidateGroup = String(currentGroup.dropLast(".WhisperKeyboard".count))
+        } else if currentGroup.contains(".keyboard.") {
+            candidateGroup = currentGroup.replacingOccurrences(of: ".keyboard.", with: ".")
+        } else if currentGroup.contains(".WhisperKeyboard.") {
+            candidateGroup = currentGroup.replacingOccurrences(of: ".WhisperKeyboard.", with: ".")
+        } else {
+            candidateGroup = currentGroup
         }
-        return currentGroup
+
+        if candidateGroup != currentGroup {
+            let verifyQuery: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: keychainIPCService,
+                kSecAttrAccount as String: "whisperorb.access.check",
+                kSecAttrAccessGroup as String: candidateGroup,
+                kSecMatchLimit as String: kSecMatchLimitOne
+            ]
+            let checkStatus = SecItemCopyMatching(verifyQuery as CFDictionary, nil)
+            if checkStatus != errSecSuccess && checkStatus != errSecItemNotFound {
+                return nil
+            }
+        }
+        return candidateGroup
     }()
 
     public static func saveSharedKeychainData(_ data: Data, account: String) {
-        var scopes: [[String: Any]] = []
-        if let sharedGroup = resolvedSharedKeychainAccessGroup {
-            scopes.append([
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: keychainIPCService,
-                kSecAttrAccount as String: account,
-                kSecAttrAccessGroup as String: sharedGroup
-            ])
-        }
-        scopes.append([
+        guard let sharedGroup = resolvedSharedKeychainAccessGroup else { return }
+        let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: keychainIPCService,
-            kSecAttrAccount as String: account
-        ])
-
-        for query in scopes {
-            let attributes: [String: Any] = [
-                kSecValueData as String: data,
-                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
-            ]
-            let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
-            if status == errSecItemNotFound {
-                var addQuery = query
-                addQuery[kSecValueData as String] = data
-                addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-                if SecItemAdd(addQuery as CFDictionary, nil) == errSecSuccess {
-                    return
-                }
-            } else if status == errSecSuccess {
-                return
-            }
+            kSecAttrAccount as String: account,
+            kSecAttrAccessGroup as String: sharedGroup
+        ]
+        let attributes: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
+        ]
+        let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if status == errSecItemNotFound {
+            var addQuery = query
+            addQuery[kSecValueData as String] = data
+            addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+            _ = SecItemAdd(addQuery as CFDictionary, nil)
         }
     }
 
     public static func loadSharedKeychainData(account: String) -> Data? {
-        var scopes: [[String: Any]] = []
-        if let sharedGroup = resolvedSharedKeychainAccessGroup {
-            scopes.append([
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: keychainIPCService,
-                kSecAttrAccount as String: account,
-                kSecAttrAccessGroup as String: sharedGroup,
-                kSecReturnData as String: true,
-                kSecMatchLimit as String: kSecMatchLimitOne
-            ])
-        }
-        scopes.append([
+        guard let sharedGroup = resolvedSharedKeychainAccessGroup else { return nil }
+        let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: keychainIPCService,
             kSecAttrAccount as String: account,
+            kSecAttrAccessGroup as String: sharedGroup,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
-        ])
-
-        for query in scopes {
-            var result: AnyObject?
-            let status = SecItemCopyMatching(query as CFDictionary, &result)
-            if status == errSecSuccess, let data = result as? Data {
-                return data
-            }
+        ]
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecSuccess, let data = result as? Data {
+            return data
         }
         return nil
     }
@@ -967,8 +964,14 @@ public final class AppGroupManager: ObservableObject {
     }
 
     @Published public var downloadedModelRaws: [String] = [] {
-        didSet { if !isApplyingRemoteUpdate && oldValue != downloadedModelRaws { persistAndBroadcastState() } }
+        didSet {
+            hasAnyModelReady = !downloadedModelRaws.isEmpty
+            if !isApplyingRemoteUpdate && oldValue != downloadedModelRaws { persistAndBroadcastState() }
+        }
     }
+
+    @Published public var hasAnyModelReady: Bool = false
+    @Published public private(set) var isLoopbackBridgeConnected: Bool = false
 
     public var onToggleRecordingRequested: (() -> Void)? {
         didSet {
@@ -986,11 +989,18 @@ public final class AppGroupManager: ObservableObject {
     private var pollingTimer: Timer?
     private var lastAppliedTimestamp: TimeInterval = 0
     private var pendingTextUpdatedAt: TimeInterval? = nil
+    private var lastConsumedPendingTextAt: TimeInterval = 0
     private var toggleRecordingRequestCount: Int = 0
     private var lastHandledToggleRequestCount: Int = 0
     private var lastToggleTriggerTime: TimeInterval = 0
     private var lastAudioBroadcastTime: TimeInterval = 0
     private var hasDeferredToggle: Bool = false
+
+    private let cachedSnapshotLock = NSLock()
+    private var cachedSnapshotPayload: WhisperSharedStatePayload? = nil
+    private let loopbackClientQueue = DispatchQueue(label: "com.bluewolfy24yt.whisperorb.loopback.client", qos: .userInitiated)
+    private let loopbackRefreshLock = NSLock()
+    private var isLoopbackRefreshInFlight: Bool = false
 
     private var isKeyboardExtensionProcess: Bool {
         Bundle.main.bundlePath.hasSuffix(".appex")
@@ -1013,20 +1023,29 @@ public final class AppGroupManager: ObservableObject {
             self.userDefaults = UserDefaults.standard
         }
 
+        try? FileManager.default.createDirectory(at: sharedContainerURL, withIntermediateDirectories: true)
+
         if let savedEmojis = userDefaults.stringArray(forKey: Keys.recentEmojisList), !savedEmojis.isEmpty {
             self.recentEmojis = savedEmojis
         }
 
         // Initialise le compteur d'enregistrement existant pour ne jamais déclencher un faux toggle à l'ouverture
+        let initialPayload = readFreshestPayload()
+        cachedSnapshotLock.lock()
+        cachedSnapshotPayload = initialPayload
+        cachedSnapshotLock.unlock()
+
         let existingToggleCount = max(
             userDefaults.integer(forKey: Keys.toggleRecordingRequestCount),
-            readFreshestPayload()?.toggleRecordingRequestCount ?? 0
+            initialPayload?.toggleRecordingRequestCount ?? 0
         )
         self.toggleRecordingRequestCount = existingToggleCount
         // Une demande récente du clavier est justement la raison de ce lancement : ne pas la jeter.
-        let toggleRequestAge = Date().timeIntervalSince1970 - (readFreshestPayload()?.toggleRequestedAt ?? 0)
+        let toggleRequestAge = Date().timeIntervalSince1970 - (initialPayload?.toggleRequestedAt ?? 0)
         let hasFreshToggleRequest = !isKeyboardExtensionProcess && existingToggleCount > 0 && toggleRequestAge < 10.0
         self.lastHandledToggleRequestCount = hasFreshToggleRequest ? existingToggleCount - 1 : existingToggleCount
+
+        setupLoopbackBridgeIfMainApp()
 
         if !userDefaults.bool(forKey: Keys.hasLaunchedBefore) {
             self.selectedModel = HardwareDetector.recommendedTier
@@ -1038,12 +1057,218 @@ public final class AppGroupManager: ObservableObject {
         }
 
         registerDarwinNotificationObservers()
+        RemoteRulesSyncManager.shared.syncFromGitHubIfNeeded(force: false)
     }
 
     deinit {
         pollingTimer?.invalidate()
         let center = CFNotificationCenterGetDarwinNotifyCenter()
         CFNotificationCenterRemoveEveryObserver(center, Unmanaged.passUnretained(self).toOpaque())
+    }
+
+    // MARK: - Pont TCP Local 127.0.0.1 (Fonctionne sur 100 % des Sideloaders sans App Group)
+
+    private func setupLoopbackBridgeIfMainApp() {
+        guard !isKeyboardExtensionProcess else { return }
+        LocalLoopbackIPC.shared.requestHandler = { [weak self] request in
+            guard let self = self else { return LoopbackIPCResponse(ok: false) }
+            return self.handleIncomingLoopbackRequest(request)
+        }
+        LocalLoopbackIPC.shared.ensureServerRunning()
+    }
+
+    public func ensureLoopbackServerRunning() {
+        guard !isKeyboardExtensionProcess else { return }
+        LocalLoopbackIPC.shared.ensureServerRunning()
+    }
+
+    private func handleIncomingLoopbackRequest(_ request: LoopbackIPCRequest) -> LoopbackIPCResponse {
+        let now = Date().timeIntervalSince1970
+
+        switch request.action {
+        case .getState:
+            cachedSnapshotLock.lock()
+            let snapshot = cachedSnapshotPayload
+            cachedSnapshotLock.unlock()
+            let smUpdated = UserStyleMemoryManager.shared.threadSafeUpdatedAt
+            let needsStyleSync = request.knownStyleMemoryUpdatedAt == nil
+                || abs((request.knownStyleMemoryUpdatedAt ?? 0) - smUpdated) > 0.001
+            let smData = needsStyleSync ? UserStyleMemoryManager.shared.rawJSONData() : nil
+            return LoopbackIPCResponse(
+                ok: true,
+                payload: snapshot,
+                styleMemoryUpdatedAt: smUpdated,
+                styleMemoryData: smData
+            )
+
+        case .pushKeyboardSettings:
+            guard let incoming = request.clientPayload else {
+                return LoopbackIPCResponse(ok: false)
+            }
+            cachedSnapshotLock.lock()
+            var updated = cachedSnapshotPayload ?? incoming
+            updated.bgHex = incoming.bgHex
+            updated.fgHex = incoming.fgHex
+            updated.selectedModelRaw = incoming.selectedModelRaw
+            updated.selectedLanguageRaw = incoming.selectedLanguageRaw
+            updated.isKeyboardCollapsed = incoming.isKeyboardCollapsed
+            updated.isSmartAutocorrectEnabled = incoming.isSmartAutocorrectEnabled
+            updated.updatedAt = now
+            cachedSnapshotPayload = updated
+            cachedSnapshotLock.unlock()
+
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.applyRemotePayloadOnMain(updated, shouldFireToggleCallback: false)
+                self.writePayload(updated)
+            }
+            return LoopbackIPCResponse(ok: true, payload: updated)
+
+        case .consumePendingText:
+            cachedSnapshotLock.lock()
+            let rawPending = cachedSnapshotPayload?.pendingTranscribedText ?? ""
+            let pendingAge = now - (cachedSnapshotPayload?.pendingTextUpdatedAt ?? now)
+            let validText = (!rawPending.isEmpty && pendingAge <= 45.0) ? rawPending : nil
+            cachedSnapshotPayload?.pendingTranscribedText = ""
+            cachedSnapshotPayload?.pendingTextUpdatedAt = nil
+            cachedSnapshotPayload?.updatedAt = now
+            let snapshot = cachedSnapshotPayload
+            cachedSnapshotLock.unlock()
+
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.isApplyingRemoteUpdate = true
+                self.pendingTranscribedText = ""
+                self.pendingTextUpdatedAt = nil
+                self.isApplyingRemoteUpdate = false
+                if let snapshot = snapshot {
+                    self.writePayload(snapshot)
+                }
+            }
+            return LoopbackIPCResponse(ok: true, payload: snapshot, consumedText: validText)
+
+        case .consumeDeleteSentence:
+            cachedSnapshotLock.lock()
+            let shouldDel = cachedSnapshotPayload?.shouldDeleteLastSentence ?? false
+            let delLen = cachedSnapshotPayload?.lastInsertedSentenceLength ?? 0
+            let resultLen = (shouldDel && delLen > 0) ? delLen : nil
+            cachedSnapshotPayload?.shouldDeleteLastSentence = false
+            cachedSnapshotPayload?.lastInsertedSentenceLength = 0
+            cachedSnapshotPayload?.updatedAt = now
+            let snapshot = cachedSnapshotPayload
+            cachedSnapshotLock.unlock()
+
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.isApplyingRemoteUpdate = true
+                self.shouldDeleteLastSentence = false
+                self.lastInsertedSentenceLength = 0
+                self.isApplyingRemoteUpdate = false
+                if let snapshot = snapshot {
+                    self.writePayload(snapshot)
+                }
+            }
+            return LoopbackIPCResponse(ok: true, payload: snapshot, consumedDeleteLength: resultLen)
+
+        case .clearLastSentenceLength:
+            let updatedLength = request.clientPayload?.lastInsertedSentenceLength ?? 0
+            cachedSnapshotLock.lock()
+            cachedSnapshotPayload?.lastInsertedSentenceLength = updatedLength
+            cachedSnapshotPayload?.shouldDeleteLastSentence = false
+            cachedSnapshotPayload?.updatedAt = now
+            let snapshot = cachedSnapshotPayload
+            cachedSnapshotLock.unlock()
+
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.isApplyingRemoteUpdate = true
+                self.lastInsertedSentenceLength = updatedLength
+                self.shouldDeleteLastSentence = false
+                self.isApplyingRemoteUpdate = false
+                if let snapshot = snapshot {
+                    self.writePayload(snapshot)
+                }
+            }
+            return LoopbackIPCResponse(ok: true, payload: snapshot)
+
+        case .toggleRecording:
+            cachedSnapshotLock.lock()
+            let currentMax = cachedSnapshotPayload?.toggleRecordingRequestCount ?? 0
+            let nextCount = max(currentMax + 1, request.clientPayload?.toggleRecordingRequestCount ?? (currentMax + 1))
+            cachedSnapshotPayload?.toggleRecordingRequestCount = nextCount
+            cachedSnapshotPayload?.toggleRequestedAt = now
+            cachedSnapshotPayload?.updatedAt = now
+            let snapshot = cachedSnapshotPayload
+            cachedSnapshotLock.unlock()
+
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                if nextCount > self.lastHandledToggleRequestCount {
+                    self.toggleRecordingRequestCount = nextCount
+                    self.lastHandledToggleRequestCount = nextCount
+                    self.userDefaults.set(nextCount, forKey: Keys.toggleRecordingRequestCount)
+                    self.dispatchDebouncedToggleRecording()
+                }
+            }
+            return LoopbackIPCResponse(ok: true, payload: snapshot)
+
+        case .getStyleMemory:
+            return LoopbackIPCResponse(
+                ok: true,
+                styleMemoryUpdatedAt: UserStyleMemoryManager.shared.threadSafeUpdatedAt,
+                styleMemoryData: UserStyleMemoryManager.shared.rawJSONData()
+            )
+        }
+    }
+
+    private func refreshFromLoopbackBridgeAsync() {
+        guard isKeyboardExtensionProcess else { return }
+
+        loopbackRefreshLock.lock()
+        if isLoopbackRefreshInFlight {
+            loopbackRefreshLock.unlock()
+            return
+        }
+        isLoopbackRefreshInFlight = true
+        loopbackRefreshLock.unlock()
+
+        let knownSMUpdatedAt = UserStyleMemoryManager.shared.memory.updatedAt
+        loopbackClientQueue.async { [weak self] in
+            guard let self = self else { return }
+            defer {
+                self.loopbackRefreshLock.lock()
+                self.isLoopbackRefreshInFlight = false
+                self.loopbackRefreshLock.unlock()
+            }
+
+            let req = LoopbackIPCRequest(action: .getState, knownStyleMemoryUpdatedAt: knownSMUpdatedAt)
+            if let resp = LocalLoopbackIPC.shared.sendRequest(req), resp.ok, let remotePayload = resp.payload {
+                if let smData = resp.styleMemoryData {
+                    UserStyleMemoryManager.shared.applyRemoteStyleMemoryData(smData)
+                }
+                DispatchQueue.main.async {
+                    if !self.isLoopbackBridgeConnected {
+                        self.isLoopbackBridgeConnected = true
+                    }
+                    self.applyRemotePayloadOnMain(remotePayload, shouldFireToggleCallback: false)
+                }
+            } else {
+                DispatchQueue.main.async {
+                    if self.isLoopbackBridgeConnected {
+                        self.isLoopbackBridgeConnected = false
+                    }
+                    // Si aucun App Group ni Keychain partagé n'est actif et que le serveur local ne répond pas,
+                    // l'application hôte est fermée ou suspendue : on remet immédiatement l'état moteur à false.
+                    if !self.hasNativeAppGroupContainer && Self.resolvedSharedKeychainAccessGroup == nil {
+                        self.isApplyingRemoteUpdate = true
+                        if self.isBackgroundEngineActive { self.isBackgroundEngineActive = false }
+                        if self.orbState != .idle { self.orbState = .idle }
+                        if self.currentAudioLevel != 0.0 { self.currentAudioLevel = 0.0 }
+                        self.isApplyingRemoteUpdate = false
+                    }
+                }
+            }
+        }
     }
 
     public func recordUsedEmoji(_ emoji: String) {
@@ -1068,38 +1293,46 @@ public final class AppGroupManager: ObservableObject {
     }
 
     public func recordEngineHeartbeat() {
+        ensureLoopbackServerRunning()
         let now = Date().timeIntervalSince1970
+        cachedSnapshotLock.lock()
+        cachedSnapshotPayload?.engineHeartbeatAt = now
+        cachedSnapshotPayload?.isBackgroundEngineActive = true
+        cachedSnapshotLock.unlock()
+
         userDefaults.set(now, forKey: Keys.engineHeartbeatTimestamp)
         let str = String(now)
         try? str.write(to: heartbeatFileURL, atomically: false, encoding: .utf8)
         if !hasNativeAppGroupContainer, let data = str.data(using: .utf8) {
             Self.saveSharedKeychainData(data, account: Keys.engineHeartbeatTimestamp)
-            writeHeartbeatToPasteboard(data)
         }
     }
 
-    private func writeHeartbeatToPasteboard(_ data: Data) {
-        UIPasteboard(name: Self.heartbeatPasteboardName, create: true)?
-            .setData(data, forPasteboardType: "public.utf8-plain-text")
-    }
-
-    private func readHeartbeatFromPasteboard() -> Double {
-        guard let pb = UIPasteboard(name: Self.heartbeatPasteboardName, create: false),
-              let data = pb.data(forPasteboardType: "public.utf8-plain-text"),
-              let str = String(data: data, encoding: .utf8) else { return 0 }
-        return Double(str) ?? 0
-    }
-
     public func clearEngineHeartbeat() {
+        cachedSnapshotLock.lock()
+        cachedSnapshotPayload?.engineHeartbeatAt = 0.0
+        cachedSnapshotPayload?.isBackgroundEngineActive = false
+        cachedSnapshotPayload?.orbStateRaw = WhisperOrbState.idle.rawValue
+        cachedSnapshotPayload?.currentAudioLevel = 0.0
+        cachedSnapshotLock.unlock()
+
         userDefaults.set(0.0, forKey: Keys.engineHeartbeatTimestamp)
         try? "0".write(to: heartbeatFileURL, atomically: false, encoding: .utf8)
         if !hasNativeAppGroupContainer, let data = "0".data(using: .utf8) {
             Self.saveSharedKeychainData(data, account: Keys.engineHeartbeatTimestamp)
-            writeHeartbeatToPasteboard(data)
         }
     }
 
     public var isEngineHeartbeatFresh: Bool {
+        if isKeyboardExtensionProcess && isLoopbackBridgeConnected {
+            cachedSnapshotLock.lock()
+            let loopbackActive = cachedSnapshotPayload?.isBackgroundEngineActive ?? false
+            let loopbackBeat = cachedSnapshotPayload?.engineHeartbeatAt ?? 0
+            cachedSnapshotLock.unlock()
+            if loopbackActive && loopbackBeat > 0 && (Date().timeIntervalSince1970 - loopbackBeat) < 12.0 {
+                return true
+            }
+        }
         let fileBeat = hasNativeAppGroupContainer
             ? ((try? String(contentsOf: heartbeatFileURL, encoding: .utf8)).flatMap { Double($0) } ?? 0)
             : 0
@@ -1108,14 +1341,14 @@ public final class AppGroupManager: ObservableObject {
            let kcData = Self.loadSharedKeychainData(account: Keys.engineHeartbeatTimestamp),
            let kcStr = String(data: kcData, encoding: .utf8),
            let val = Double(kcStr) {
-            keychainBeat = max(val, readHeartbeatFromPasteboard())
-        } else if !hasNativeAppGroupContainer {
-            keychainBeat = readHeartbeatFromPasteboard()
+            keychainBeat = val
         } else {
             keychainBeat = 0
         }
         let defaultsBeat = hasNativeAppGroupContainer ? userDefaults.double(forKey: Keys.engineHeartbeatTimestamp) : 0
-        let payloadBeat = readFreshestPayload()?.engineHeartbeatAt ?? 0
+        let payloadBeat = (hasNativeAppGroupContainer || Self.resolvedSharedKeychainAccessGroup != nil)
+            ? (readFreshestPayload()?.engineHeartbeatAt ?? 0)
+            : 0
         let lastBeat = max(max(fileBeat, keychainBeat), max(defaultsBeat, payloadBeat))
         guard lastBeat > 0 else { return false }
         return (Date().timeIntervalSince1970 - lastBeat) < 12.0
@@ -1127,7 +1360,9 @@ public final class AppGroupManager: ObservableObject {
         if let groupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: Self.appGroupIdentifier) {
             return groupURL
         }
-        return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let docsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        try? FileManager.default.createDirectory(at: docsURL, withIntermediateDirectories: true)
+        return docsURL
     }
 
     public var modelsDirectoryURL: URL {
@@ -1147,8 +1382,19 @@ public final class AppGroupManager: ObservableObject {
 
     public var isSharedContainerAvailable: Bool {
         if hasNativeAppGroupContainer { return true }
-        // Vérifie que le groupe Keychain partagé est bien résolu pour l'IPC App <-> Clavier
-        return Self.resolvedSharedKeychainAccessGroup != nil
+        if Self.resolvedSharedKeychainAccessGroup != nil { return true }
+        // En mode sideloading (Sideloadly / Feather / ESign), le pont local 127.0.0.1 assure l'IPC App <-> Clavier
+        return !isKeyboardExtensionProcess || isLoopbackBridgeConnected
+    }
+
+    public var activeIPCModeDescription: String {
+        if hasNativeAppGroupContainer {
+            return "App Group natif (\(Self.appGroupIdentifier))"
+        }
+        if Self.resolvedSharedKeychainAccessGroup != nil {
+            return "Keychain partagé + Pont local 127.0.0.1"
+        }
+        return "Pont local 127.0.0.1 actif (Compatible Sideloadly / AltStore / SideStore)"
     }
 
     private var sharedStateFileURL: URL {
@@ -1175,21 +1421,26 @@ public final class AppGroupManager: ObservableObject {
             }
         }
 
-        if !hasNativeAppGroupContainer {
+        if hasNativeAppGroupContainer {
+            consider(userDefaults.data(forKey: Keys.sharedPayloadData))
+            consider(try? Data(contentsOf: sharedStateFileURL))
+        } else if Self.resolvedSharedKeychainAccessGroup != nil {
             consider(Self.loadSharedKeychainData(account: Keys.sharedPayloadData))
-            if let pb = UIPasteboard(name: Self.pasteboardBusName, create: false) {
-                consider(pb.data(forPasteboardType: "public.json"))
+            if freshest == nil {
+                consider(userDefaults.data(forKey: Keys.sharedPayloadData))
+                consider(try? Data(contentsOf: sharedStateFileURL))
             }
+        } else {
+            consider(userDefaults.data(forKey: Keys.sharedPayloadData))
+            consider(try? Data(contentsOf: sharedStateFileURL))
         }
-        consider(userDefaults.data(forKey: Keys.sharedPayloadData))
-        consider(try? Data(contentsOf: sharedStateFileURL))
 
         return freshest
     }
 
-    // Verrou inter-processus court et non bloquant : on ne garde jamais un verrou en attente,
-    // car iOS tue une app suspendue qui détient un verrou dans un conteneur partagé.
+    // Verrou inter-processus court et non bloquant : uniquement nécessaire sur un vrai conteneur App Group partagé.
     private func acquireStateLock() -> Int32 {
+        guard hasNativeAppGroupContainer else { return -1 }
         let path = sharedContainerURL.appendingPathComponent("whisperorb_state.lock").path
         let fd = open(path, O_CREAT | O_RDWR, 0o644)
         guard fd >= 0 else { return -1 }
@@ -1227,18 +1478,21 @@ public final class AppGroupManager: ObservableObject {
     }
 
     private func writePayload(_ payload: WhisperSharedStatePayload) {
+        cachedSnapshotLock.lock()
+        cachedSnapshotPayload = payload
+        cachedSnapshotLock.unlock()
+
         guard let encoded = try? JSONEncoder().encode(payload) else { return }
         userDefaults.set(encoded, forKey: Keys.sharedPayloadData)
+        try? FileManager.default.createDirectory(at: sharedStateFileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? encoded.write(to: sharedStateFileURL, options: [.atomic])
         if !hasNativeAppGroupContainer {
             Self.saveSharedKeychainData(encoded, account: Keys.sharedPayloadData)
-            if let pb = UIPasteboard(name: Self.pasteboardBusName, create: true) {
-                pb.setData(encoded, forPasteboardType: "public.json")
-            }
         }
     }
 
     public func persistAndBroadcastState(postDarwinNotification: Bool = true, overwritePendingTextState: Bool = false) {
+        ensureLoopbackServerRunning()
         let now = Date().timeIntervalSince1970
         lastAppliedTimestamp = now
 
@@ -1266,8 +1520,10 @@ public final class AppGroupManager: ObservableObject {
         let authoritativeDownloadedModels = isKeyboardExtensionProcess
             ? (existing?.downloadedModelRaws ?? downloadedModelRaws)
             : downloadedModelRaws
+        let authoritativeHasModel = isKeyboardExtensionProcess
+            ? (existing?.hasAnyModelReady ?? hasAnyModelReady)
+            : !downloadedModelRaws.isEmpty
 
-        // Empêche l'application principale de ressusciter un pendingTranscribedText déjà consommé par le clavier
         let authoritativePendingText: String
         let authoritativePendingTextTime: TimeInterval?
         let authoritativeLastSentenceLen: Int
@@ -1326,12 +1582,21 @@ public final class AppGroupManager: ObservableObject {
             isKeyboardCollapsed: isKeyboardCollapsed,
             isSmartAutocorrectEnabled: isSmartAutocorrectEnabled,
             downloadedModelRaws: authoritativeDownloadedModels,
+            hasAnyModelReady: authoritativeHasModel,
             toggleRecordingRequestCount: latestToggleCount,
             toggleRequestedAt: existing?.toggleRequestedAt,
             updatedAt: now
         )
 
         writePayload(payload)
+
+        if isKeyboardExtensionProcess && !hasNativeAppGroupContainer {
+            loopbackClientQueue.async {
+                _ = LocalLoopbackIPC.shared.sendRequest(
+                    LoopbackIPCRequest(action: .pushKeyboardSettings, clientPayload: payload)
+                )
+            }
+        }
 
         if postDarwinNotification {
             postDarwinNotificationNamed(Self.darwinStateUpdatedNotification)
@@ -1346,6 +1611,10 @@ public final class AppGroupManager: ObservableObject {
             return
         }
         lastAudioBroadcastTime = now
+
+        cachedSnapshotLock.lock()
+        cachedSnapshotPayload?.currentAudioLevel = clamped
+        cachedSnapshotLock.unlock()
 
         if DispatchQueue.isMain {
             self.currentAudioLevel = clamped
@@ -1364,6 +1633,10 @@ public final class AppGroupManager: ObservableObject {
 
     private func reloadLiveAudioLevelOnly() {
         guard isKeyboardExtensionProcess else { return }
+        if !hasNativeAppGroupContainer && Self.resolvedSharedKeychainAccessGroup == nil {
+            refreshFromLoopbackBridgeAsync()
+            return
+        }
         let level: Float
         if !hasNativeAppGroupContainer,
            let kcData = Self.loadSharedKeychainData(account: Keys.liveAudioLevel),
@@ -1385,7 +1658,15 @@ public final class AppGroupManager: ObservableObject {
     }
 
     public func reloadStateFromChannels() {
+        ensureLoopbackServerRunning()
         UserStyleMemoryManager.shared.reloadFromDisk()
+
+        if isKeyboardExtensionProcess && !hasNativeAppGroupContainer {
+            refreshFromLoopbackBridgeAsync()
+            if Self.resolvedSharedKeychainAccessGroup == nil {
+                return
+            }
+        }
 
         guard let validPayload = readFreshestPayload() else {
             return
@@ -1401,108 +1682,193 @@ public final class AppGroupManager: ObservableObject {
         }
         if remoteToggleCount > self.lastHandledToggleRequestCount {
             self.lastHandledToggleRequestCount = remoteToggleCount
-            // Une demande ancienne ne doit pas lancer l'écoute quand l'app est rouverte plus tard
             let requestAge = Date().timeIntervalSince1970 - (validPayload.toggleRequestedAt ?? 0)
             if !isKeyboardExtensionProcess && requestAge < 15.0 {
                 shouldFireToggleCallback = true
             }
         }
 
+        if Thread.isMainThread {
+            applyRemotePayloadOnMain(validPayload, shouldFireToggleCallback: shouldFireToggleCallback)
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.applyRemotePayloadOnMain(validPayload, shouldFireToggleCallback: shouldFireToggleCallback)
+            }
+        }
+    }
+
+    private func applyRemotePayloadOnMain(_ validPayload: WhisperSharedStatePayload, shouldFireToggleCallback: Bool) {
+        cachedSnapshotLock.lock()
+        if let existing = cachedSnapshotPayload {
+            if validPayload.updatedAt >= existing.updatedAt {
+                cachedSnapshotPayload = validPayload
+            }
+        } else {
+            cachedSnapshotPayload = validPayload
+        }
+        cachedSnapshotLock.unlock()
+
         lastAppliedTimestamp = max(lastAppliedTimestamp, validPayload.updatedAt)
 
-        let applyBlock = { [weak self] in
-            guard let self = self else { return }
-            self.isApplyingRemoteUpdate = true
-            defer {
-                self.isApplyingRemoteUpdate = false
-                if shouldFireToggleCallback {
-                    self.dispatchDebouncedToggleRecording()
-                }
-            }
-
-            if self.bgHex != validPayload.bgHex { self.bgHex = validPayload.bgHex }
-            if self.fgHex != validPayload.fgHex { self.fgHex = validPayload.fgHex }
-            if let model = WhisperModelTier(rawValue: validPayload.selectedModelRaw), self.selectedModel != model {
-                self.selectedModel = model
-            }
-            if let langRaw = validPayload.selectedLanguageRaw,
-               let lang = WhisperLanguageSelection(rawValue: langRaw),
-               self.selectedLanguage != lang {
-                self.selectedLanguage = lang
-            }
-            if let sim4GB = validPayload.simulateModest4GBDevice, self.simulateModest4GBDevice != sim4GB {
-                self.simulateModest4GBDevice = sim4GB
-            }
-            if let forceUnlock = validPayload.forceUnlockAllModels, self.forceUnlockAllModels != forceUnlock {
-                self.forceUnlockAllModels = forceUnlock
-            }
-            if let remoteDownloaded = validPayload.downloadedModelRaws, self.downloadedModelRaws != remoteDownloaded {
-                self.downloadedModelRaws = remoteDownloaded
-            }
-            if self.isKeyboardExtensionProcess {
-                let engineAlive = self.isEngineHeartbeatFresh
-                if self.isBackgroundEngineActive != engineAlive {
-                    self.isBackgroundEngineActive = engineAlive
-                }
-                if engineAlive {
-                    if let state = WhisperOrbState(rawValue: validPayload.orbStateRaw), self.orbState != state {
-                        self.orbState = state
-                    }
-                    if abs(self.currentAudioLevel - validPayload.currentAudioLevel) > 0.005 {
-                        self.currentAudioLevel = validPayload.currentAudioLevel
-                    }
-                } else {
-                    if self.orbState != .idle {
-                        self.orbState = .idle
-                    }
-                    if self.currentAudioLevel != 0.0 {
-                        self.currentAudioLevel = 0.0
-                    }
-                }
-            }
-            self.pendingTextUpdatedAt = validPayload.pendingTextUpdatedAt
-            if self.pendingTranscribedText != validPayload.pendingTranscribedText {
-                self.pendingTranscribedText = validPayload.pendingTranscribedText
-            }
-            if self.lastInsertedSentenceLength != validPayload.lastInsertedSentenceLength {
-                self.lastInsertedSentenceLength = validPayload.lastInsertedSentenceLength
-            }
-            if self.shouldDeleteLastSentence != validPayload.shouldDeleteLastSentence {
-                self.shouldDeleteLastSentence = validPayload.shouldDeleteLastSentence
-            }
-            if self.autoSpaceForGoodnotes != validPayload.autoSpaceForGoodnotes {
-                self.autoSpaceForGoodnotes = validPayload.autoSpaceForGoodnotes
-            }
-            if self.autoPunctuation != validPayload.autoPunctuation {
-                self.autoPunctuation = validPayload.autoPunctuation
-            }
-            if abs(self.vadSilenceThresholdSeconds - validPayload.vadSilenceThresholdSeconds) > 0.01 {
-                self.vadSilenceThresholdSeconds = validPayload.vadSilenceThresholdSeconds
-            }
-            if let remoteCollapsed = validPayload.isKeyboardCollapsed, self.isKeyboardCollapsed != remoteCollapsed {
-                self.isKeyboardCollapsed = remoteCollapsed
-            }
-            if let remoteAutocorrect = validPayload.isSmartAutocorrectEnabled, self.isSmartAutocorrectEnabled != remoteAutocorrect {
-                self.isSmartAutocorrectEnabled = remoteAutocorrect
+        isApplyingRemoteUpdate = true
+        defer {
+            isApplyingRemoteUpdate = false
+            if shouldFireToggleCallback {
+                dispatchDebouncedToggleRecording()
             }
         }
 
-        if Thread.isMainThread {
-            applyBlock()
+        if bgHex != validPayload.bgHex { bgHex = validPayload.bgHex }
+        if fgHex != validPayload.fgHex { fgHex = validPayload.fgHex }
+        if let model = WhisperModelTier(rawValue: validPayload.selectedModelRaw), selectedModel != model {
+            selectedModel = model
+        }
+        if let langRaw = validPayload.selectedLanguageRaw,
+           let lang = WhisperLanguageSelection(rawValue: langRaw),
+           selectedLanguage != lang {
+            selectedLanguage = lang
+        }
+        if let sim4GB = validPayload.simulateModest4GBDevice, simulateModest4GBDevice != sim4GB {
+            simulateModest4GBDevice = sim4GB
+        }
+        if let forceUnlock = validPayload.forceUnlockAllModels, forceUnlockAllModels != forceUnlock {
+            forceUnlockAllModels = forceUnlock
+        }
+        if let remoteDownloaded = validPayload.downloadedModelRaws, downloadedModelRaws != remoteDownloaded {
+            downloadedModelRaws = remoteDownloaded
+        }
+        if let remoteHasModel = validPayload.hasAnyModelReady {
+            if hasAnyModelReady != remoteHasModel {
+                hasAnyModelReady = remoteHasModel
+            }
         } else {
-            DispatchQueue.main.async(execute: applyBlock)
+            let inferred = !(validPayload.downloadedModelRaws ?? downloadedModelRaws).isEmpty
+            if hasAnyModelReady != inferred {
+                hasAnyModelReady = inferred
+            }
+        }
+
+        if isKeyboardExtensionProcess {
+            let engineAlive: Bool
+            if isLoopbackBridgeConnected {
+                let beatAge = Date().timeIntervalSince1970 - (validPayload.engineHeartbeatAt ?? 0)
+                engineAlive = validPayload.isBackgroundEngineActive && beatAge < 12.0
+            } else {
+                engineAlive = isEngineHeartbeatFresh
+            }
+            if isBackgroundEngineActive != engineAlive {
+                isBackgroundEngineActive = engineAlive
+            }
+            if engineAlive {
+                if let state = WhisperOrbState(rawValue: validPayload.orbStateRaw), orbState != state {
+                    orbState = state
+                }
+                if abs(currentAudioLevel - validPayload.currentAudioLevel) > 0.005 {
+                    currentAudioLevel = validPayload.currentAudioLevel
+                }
+            } else {
+                if orbState != .idle {
+                    orbState = .idle
+                }
+                if currentAudioLevel != 0.0 {
+                    currentAudioLevel = 0.0
+                }
+            }
+        }
+
+        // Ignore tout texte déjà consommé localement par le clavier (anti-doublon)
+        let incomingTextTimestamp = validPayload.pendingTextUpdatedAt ?? 0
+        if !validPayload.pendingTranscribedText.isEmpty && incomingTextTimestamp > 0 && incomingTextTimestamp <= lastConsumedPendingTextAt {
+            // Déjà inséré dans le champ texte
+        } else {
+            pendingTextUpdatedAt = validPayload.pendingTextUpdatedAt
+            if pendingTranscribedText != validPayload.pendingTranscribedText {
+                pendingTranscribedText = validPayload.pendingTranscribedText
+            }
+        }
+
+        if lastInsertedSentenceLength != validPayload.lastInsertedSentenceLength {
+            lastInsertedSentenceLength = validPayload.lastInsertedSentenceLength
+        }
+        if shouldDeleteLastSentence != validPayload.shouldDeleteLastSentence {
+            shouldDeleteLastSentence = validPayload.shouldDeleteLastSentence
+        }
+        if autoSpaceForGoodnotes != validPayload.autoSpaceForGoodnotes {
+            autoSpaceForGoodnotes = validPayload.autoSpaceForGoodnotes
+        }
+        if autoPunctuation != validPayload.autoPunctuation {
+            autoPunctuation = validPayload.autoPunctuation
+        }
+        if abs(vadSilenceThresholdSeconds - validPayload.vadSilenceThresholdSeconds) > 0.01 {
+            vadSilenceThresholdSeconds = validPayload.vadSilenceThresholdSeconds
+        }
+        if let remoteCollapsed = validPayload.isKeyboardCollapsed, isKeyboardCollapsed != remoteCollapsed {
+            isKeyboardCollapsed = remoteCollapsed
+        }
+        if let remoteAutocorrect = validPayload.isSmartAutocorrectEnabled, isSmartAutocorrectEnabled != remoteAutocorrect {
+            isSmartAutocorrectEnabled = remoteAutocorrect
         }
     }
 
     private func dispatchDebouncedToggleRecording() {
         guard !isKeyboardExtensionProcess else { return }
         let now = Date().timeIntervalSince1970
-        guard now - lastToggleTriggerTime > 0.2 else { return }
+        guard now - lastToggleTriggerTime > 0.25 else { return }
         lastToggleTriggerTime = now
         if let callback = onToggleRecordingRequested {
             callback()
         } else {
             hasDeferredToggle = true
+        }
+    }
+
+    /// Déclenche la dictée sur place si le moteur vocal et un modèle IA sont prêts (y compris via sonde instantanée 127.0.0.1),
+    /// ou réveille automatiquement `WhisperOrbApp` si le moteur est arrêté ou si aucun modèle n'est installé.
+    public func triggerDictationOrWakeApp(onWakeAppNeeded: @escaping () -> Void) {
+        if hasNativeAppGroupContainer || Self.resolvedSharedKeychainAccessGroup != nil {
+            reloadStateFromChannels()
+            let engineIsOff = !isBackgroundEngineActive && orbState == .idle
+            let noModel = !hasAnyModelReady && downloadedModelRaws.isEmpty
+            if engineIsOff || noModel {
+                onWakeAppNeeded()
+            } else {
+                requestToggleRecordingFromKeyboard()
+            }
+            return
+        }
+
+        let knownReady = isLoopbackBridgeConnected
+            && (isBackgroundEngineActive || orbState != .idle)
+            && (hasAnyModelReady || !downloadedModelRaws.isEmpty)
+        if knownReady {
+            requestToggleRecordingFromKeyboard()
+            return
+        }
+
+        loopbackClientQueue.async { [weak self] in
+            guard let self = self else { return }
+            if let probe = LocalLoopbackIPC.shared.sendRequest(LoopbackIPCRequest(action: .getState)),
+               probe.ok,
+               let remote = probe.payload {
+                let beatAge = Date().timeIntervalSince1970 - (remote.engineHeartbeatAt ?? 0)
+                let remoteEngineReady = remote.isBackgroundEngineActive && beatAge < 12.0
+                let remoteModelReady = (remote.hasAnyModelReady ?? false) || !(remote.downloadedModelRaws ?? []).isEmpty
+
+                DispatchQueue.main.async {
+                    self.isLoopbackBridgeConnected = true
+                    self.applyRemotePayloadOnMain(remote, shouldFireToggleCallback: false)
+                    if remoteEngineReady && remoteModelReady {
+                        self.requestToggleRecordingFromKeyboard()
+                    } else {
+                        onWakeAppNeeded()
+                    }
+                }
+            } else {
+                DispatchQueue.main.async {
+                    self.isLoopbackBridgeConnected = false
+                    onWakeAppNeeded()
+                }
+            }
         }
     }
 
@@ -1523,6 +1889,51 @@ public final class AppGroupManager: ObservableObject {
             $0.toggleRequestedAt = requestedAt
         }) {
             persistAndBroadcastState(postDarwinNotification: false)
+        }
+
+        if isKeyboardExtensionProcess && !hasNativeAppGroupContainer {
+            var togglePayload = cachedSnapshotPayload ?? WhisperSharedStatePayload(
+                bgHex: bgHex,
+                fgHex: fgHex,
+                selectedModelRaw: selectedModel.rawValue,
+                selectedLanguageRaw: selectedLanguage.rawValue,
+                simulateModest4GBDevice: simulateModest4GBDevice,
+                forceUnlockAllModels: forceUnlockAllModels,
+                orbStateRaw: orbState.rawValue,
+                currentAudioLevel: currentAudioLevel,
+                pendingTranscribedText: "",
+                pendingTextUpdatedAt: nil,
+                lastInsertedSentenceLength: lastInsertedSentenceLength,
+                shouldDeleteLastSentence: false,
+                autoSpaceForGoodnotes: autoSpaceForGoodnotes,
+                autoPunctuation: autoPunctuation,
+                vadSilenceThresholdSeconds: vadSilenceThresholdSeconds,
+                isBackgroundEngineActive: isBackgroundEngineActive,
+                engineHeartbeatAt: nil,
+                isKeyboardCollapsed: isKeyboardCollapsed,
+                isSmartAutocorrectEnabled: isSmartAutocorrectEnabled,
+                downloadedModelRaws: downloadedModelRaws,
+                hasAnyModelReady: hasAnyModelReady,
+                toggleRecordingRequestCount: nextCount,
+                toggleRequestedAt: requestedAt,
+                updatedAt: requestedAt
+            )
+            togglePayload.toggleRecordingRequestCount = nextCount
+            togglePayload.toggleRequestedAt = requestedAt
+
+            loopbackClientQueue.async { [weak self] in
+                if let resp = LocalLoopbackIPC.shared.sendRequest(
+                    LoopbackIPCRequest(action: .toggleRecording, clientPayload: togglePayload)
+                ), resp.ok, let remotePayload = resp.payload {
+                    DispatchQueue.main.async {
+                        self?.isLoopbackBridgeConnected = true
+                        self?.applyRemotePayloadOnMain(remotePayload, shouldFireToggleCallback: false)
+                    }
+                } else {
+                    self?.postDarwinNotificationNamed(Self.darwinToggleRecordingNotification)
+                }
+            }
+            return
         }
 
         postDarwinNotificationNamed(Self.darwinToggleRecordingNotification)
@@ -1581,11 +1992,23 @@ public final class AppGroupManager: ObservableObject {
         let textTimestamp = pendingTextUpdatedAt ?? readFreshestPayload()?.pendingTextUpdatedAt
         let isFresh = textTimestamp == nil || (now - (textTimestamp ?? now)) <= 45.0
 
+        if let ts = textTimestamp, ts > lastConsumedPendingTextAt {
+            lastConsumedPendingTextAt = ts
+        } else {
+            lastConsumedPendingTextAt = now
+        }
+
         let textToInsert = isFresh ? pendingTranscribedText : nil
         isApplyingRemoteUpdate = true
         pendingTranscribedText = ""
         pendingTextUpdatedAt = nil
         isApplyingRemoteUpdate = false
+
+        if isKeyboardExtensionProcess && !hasNativeAppGroupContainer {
+            loopbackClientQueue.async {
+                _ = LocalLoopbackIPC.shared.sendRequest(LoopbackIPCRequest(action: .consumePendingText))
+            }
+        }
 
         if mutateSharedPayload({
             $0.pendingTranscribedText = ""
@@ -1630,6 +2053,12 @@ public final class AppGroupManager: ObservableObject {
         lastInsertedSentenceLength = 0
         isApplyingRemoteUpdate = false
 
+        if isKeyboardExtensionProcess && !hasNativeAppGroupContainer {
+            loopbackClientQueue.async {
+                _ = LocalLoopbackIPC.shared.sendRequest(LoopbackIPCRequest(action: .consumeDeleteSentence))
+            }
+        }
+
         if mutateSharedPayload({
             $0.shouldDeleteLastSentence = false
             $0.lastInsertedSentenceLength = 0
@@ -1641,12 +2070,38 @@ public final class AppGroupManager: ObservableObject {
         return length
     }
 
+    public func updateInsertedSentenceLengthFromKeyboard(_ length: Int) {
+        isApplyingRemoteUpdate = true
+        lastInsertedSentenceLength = length
+        isApplyingRemoteUpdate = false
+
+        if isKeyboardExtensionProcess && !hasNativeAppGroupContainer {
+            var payload = cachedSnapshotPayload
+            payload?.lastInsertedSentenceLength = length
+            loopbackClientQueue.async {
+                _ = LocalLoopbackIPC.shared.sendRequest(
+                    LoopbackIPCRequest(action: .clearLastSentenceLength, clientPayload: payload)
+                )
+            }
+        }
+
+        _ = mutateSharedPayload {
+            $0.lastInsertedSentenceLength = length
+        }
+    }
+
     public func clearLastInsertedSentenceLength() {
         guard lastInsertedSentenceLength != 0 || shouldDeleteLastSentence else { return }
         isApplyingRemoteUpdate = true
         lastInsertedSentenceLength = 0
         shouldDeleteLastSentence = false
         isApplyingRemoteUpdate = false
+
+        if isKeyboardExtensionProcess && !hasNativeAppGroupContainer {
+            loopbackClientQueue.async {
+                _ = LocalLoopbackIPC.shared.sendRequest(LoopbackIPCRequest(action: .clearLastSentenceLength))
+            }
+        }
 
         if mutateSharedPayload({
             $0.lastInsertedSentenceLength = 0
@@ -1674,7 +2129,13 @@ public final class AppGroupManager: ObservableObject {
                         manager.userDefaults.integer(forKey: Keys.toggleRecordingRequestCount),
                         manager.readFreshestPayload()?.toggleRecordingRequestCount ?? 0
                     )
-                    let isNewRequest = remoteCount > manager.lastHandledToggleRequestCount || remoteCount == 0
+                    let now = Date().timeIntervalSince1970
+                    let isNewRequest: Bool
+                    if remoteCount > 0 {
+                        isNewRequest = remoteCount > manager.lastHandledToggleRequestCount
+                    } else {
+                        isNewRequest = (now - manager.lastToggleTriggerTime) > 0.65
+                    }
                     if remoteCount > manager.toggleRecordingRequestCount {
                         manager.toggleRecordingRequestCount = remoteCount
                     }

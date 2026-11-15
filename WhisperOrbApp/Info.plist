@@ -17,9 +17,26 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.2.1</string>
+    <string>2.3.0</string>
     <key>CFBundleVersion</key>
-    <string>4</string>
+    <string>25</string>
+    <key>ALTAppGroups</key>
+    <array>
+        <string>group.com.bluewolfy24yt.whisperorb</string>
+    </array>
+    <key>LSApplicationQueriesSchemes</key>
+    <array>
+        <string>sidestore</string>
+        <string>altstore</string>
+        <string>feather</string>
+        <string>scarlet</string>
+        <string>apple-magnifier</string>
+    </array>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>

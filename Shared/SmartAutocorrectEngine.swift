@@ -422,8 +422,11 @@ public final class SmartAutocorrectEngine {
             .replacingOccurrences(of: "'", with: "")
             .replacingOccurrences(of: "’", with: "")
 
+        let otaDirectFix = RemoteRulesSyncManager.shared.extraInstantCorrection(for: lowerTyped, languageCode: lang)
+            ?? RemoteRulesSyncManager.shared.extraInstantCorrection(for: strippedApostropheKey, languageCode: lang)
+
         if let instantMap = instantCorrectionsByLang[lang] {
-            if let directFix = instantMap[lowerTyped] ?? instantMap[strippedApostropheKey] {
+            if let directFix = otaDirectFix ?? instantMap[lowerTyped] ?? instantMap[strippedApostropheKey] {
                 let casedFix = applyCasing(directFix, isCapitalized: isCapitalized, isAllCaps: isAllCaps)
                 let shouldReplace = (casedFix.lowercased() != lowerTyped)
                 let altPredictions = findPrefixCompletions(prefix: lowerTyped, languageCode: lang, excluding: [casedFix, currentPrefix])
@@ -440,7 +443,7 @@ public final class SmartAutocorrectEngine {
             // Support des élisions françaises avec apostrophe déjà tapée (ex: "l'ecole" -> "l'école", "d'apres" -> "d'après")
             if lang == "fr", let (elisionPrefix, stem) = splitFrenchElision(currentPrefix) {
                 let lowerStem = stem.lowercased()
-                if let stemFix = instantMap[lowerStem] {
+                if let stemFix = RemoteRulesSyncManager.shared.extraInstantCorrection(for: lowerStem, languageCode: lang) ?? instantMap[lowerStem] {
                     let combinedFix = elisionPrefix + stemFix
                     let shouldReplace = (combinedFix.lowercased() != lowerTyped)
                     let stemCompletions = findPrefixCompletions(prefix: lowerStem, languageCode: lang, excluding: [stemFix, lowerStem])

@@ -8,6 +8,7 @@ public struct ContentView: View {
     @EnvironmentObject private var modelDownloader: ModelDownloader
     @EnvironmentObject private var whisperEngine: WhisperEngine
     @EnvironmentObject private var networkMonitor: NetworkMonitor
+    @EnvironmentObject private var autoUpdater: AutoUpdateManager
     @ObservedObject private var styleMemory = UserStyleMemoryManager.shared
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -15,6 +16,7 @@ public struct ContentView: View {
     @State private var colorSearchText: String = ""
     @State private var showCopiedToast: Bool = false
     @State private var showRepoCopiedToast: Bool = false
+    @State private var showSourceCopiedToast: Bool = false
     @State private var showJSONCopiedToast: Bool = false
     @State private var newSpokenPhrase: String = ""
     @State private var newWrittenReplacement: String = ""
@@ -54,6 +56,7 @@ public struct ContentView: View {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 18) {
                     soberAppHeaderSection
+                    autoUpdateTopBannerSection
 
                     if horizontalSizeClass == .regular {
                         HStack(alignment: .top, spacing: 18) {
@@ -187,7 +190,7 @@ public struct ContentView: View {
                         .font(.system(size: 24, weight: .bold))
                         .foregroundColor(.white)
 
-                    Text("v2.2.1 • ON-DEVICE AI")
+                    Text("\(autoUpdater.currentVersionBadge) • ON-DEVICE AI")
                         .font(.system(size: 10, weight: .bold, design: .monospaced))
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
@@ -216,6 +219,80 @@ public struct ContentView: View {
         }
         .padding(.horizontal, 4)
         .padding(.top, 4)
+    }
+
+    @ViewBuilder
+    private var autoUpdateTopBannerSection: some View {
+        switch autoUpdater.state {
+        case .downloading(let manifest, let progress):
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .foregroundColor(Color(hex: "#0A84FF"))
+                    Text("Téléchargement automatique de WhisperOrb v\(manifest.version)... \(Int(progress * 100)) %")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white)
+                    Spacer()
+                }
+                ProgressView(value: progress, total: 1.0)
+                    .tint(Color(hex: "#0A84FF"))
+            }
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color(hex: "#131824"))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(Color(hex: "#0A84FF").opacity(0.45), lineWidth: 1)
+                    )
+            )
+
+        case .readyToInstall(let manifest, _), .updateAvailable(let manifest):
+            HStack(spacing: 12) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(Color(hex: "#30D158"))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Nouvelle mise à jour v\(manifest.version) prête")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(.white)
+                    Text(
+                        autoUpdater.detectedInstaller != nil
+                        ? "Installation directe via \(autoUpdater.detectedInstaller!.rawValue)"
+                        : "IPA téléchargé localement depuis GitHub"
+                    )
+                    .font(.system(size: 11))
+                    .foregroundColor(Color.white.opacity(0.70))
+                }
+
+                Spacer()
+
+                Button(action: {
+                    autoUpdater.installUpdateNow()
+                }) {
+                    Text("Installer")
+                        .font(.system(size: 12, weight: .bold))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(RoundedRectangle(cornerRadius: 9).fill(Color(hex: "#30D158")))
+                        .foregroundColor(.black)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color(hex: "#111E17"))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(Color(hex: "#30D158").opacity(0.45), lineWidth: 1)
+                    )
+            )
+
+        default:
+            EmptyView()
+        }
     }
 
     // MARK: - Section 1 : Studio Vocal, Langue & Écoute en Arrière-Plan
@@ -1165,30 +1242,105 @@ public struct ContentView: View {
         .background(RoundedRectangle(cornerRadius: 8).fill(Color(hex: "#0D0D11")))
     }
 
-    // MARK: - Section 5 : Partage GitHub & Guide d'Installation Universel
+    // MARK: - Section 5 : Mises à Jour Automatiques GitHub & Guide d'Installation
 
     private var card5GitHubAndSetupSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             cardSectionHeader(
-                icon: "qrcode",
-                title: "Partage & Installation (v2.2.1)",
-                subtitle: "Disponible pour Apple (iPhone, iPad, Mac) et Android (.apk)"
+                icon: "arrow.triangle.2.circlepath.circle",
+                title: "Mises à Jour Auto & Installation (\(autoUpdater.currentVersionBadge))",
+                subtitle: "Téléchargement automatique depuis GitHub Releases + Règles OTA sans clic"
             )
 
+            // Bloc Mises à Jour Automatiques GitHub
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle(isOn: $autoUpdater.isAutoUpdateEnabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Mises à jour automatiques depuis GitHub")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.white)
+                        Text(autoUpdater.statusMessage)
+                            .font(.system(size: 11))
+                            .foregroundColor(Color.white.opacity(0.65))
+                    }
+                }
+                .toggleStyle(SwitchToggleStyle(tint: Color(hex: "#30D158")))
+
+                if case .downloading(_, let progress) = autoUpdater.state {
+                    ProgressView(value: progress, total: 1.0)
+                        .tint(Color(hex: "#0A84FF"))
+                }
+
+                HStack(spacing: 8) {
+                    Button(action: {
+                        let openedDirectly = autoUpdater.addAutoUpdateSourceToSideStoreOrAltStore()
+                        if !openedDirectly {
+                            showSourceCopiedToast = true
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                                showSourceCopiedToast = false
+                            }
+                        }
+                    }) {
+                        Label(
+                            showSourceCopiedToast ? "Lien Source copié !" : "Source 0-Clic (SideStore / AltStore)",
+                            systemImage: showSourceCopiedToast ? "checkmark" : "bolt.badge.automatic"
+                        )
+                        .font(.system(size: 11, weight: .semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color(hex: "#0A84FF").opacity(0.22)))
+                        .foregroundColor(Color(hex: "#0A84FF"))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: {
+                        autoUpdater.checkForUpdatesAutomatically(force: true)
+                    }) {
+                        Label("Vérifier MAJ", systemImage: "arrow.clockwise")
+                            .font(.system(size: 11, weight: .medium))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.08)))
+                            .foregroundColor(.white)
+                    }
+                    .buttonStyle(.plain)
+
+                    if autoUpdater.downloadedIPAURL != nil {
+                        Button(action: {
+                            autoUpdater.installUpdateNow()
+                        }) {
+                            Label("Installer IPA", systemImage: "square.and.arrow.down")
+                                .font(.system(size: 11, weight: .bold))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background(RoundedRectangle(cornerRadius: 8).fill(Color(hex: "#30D158")))
+                                .foregroundColor(.black)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 12).fill(Color(hex: "#0D0D11")))
+
             VStack(alignment: .leading, spacing: 6) {
-                Text("Activer le clavier")
+                Text("Activer le clavier sur iPad / iPhone")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.white)
-                Text("Réglages > Général > Clavier > Claviers > Ajouter un clavier > WhisperOrb Clavier, puis activez « Autoriser l'accès complet ». Sans cet accès, le clavier ne peut pas recevoir la dictée.")
+                Text("Réglages > Général > Clavier > Claviers > Ajouter un clavier > WhisperOrb Clavier, puis activez impérativement « Autoriser l'accès complet » pour relier le clavier au moteur vocal.")
                     .font(.system(size: 12))
                     .foregroundColor(Color.white.opacity(0.65))
                     .fixedSize(horizontal: false, vertical: true)
-                if !appGroup.isSharedContainerAvailable {
-                    Text("⚠️ App Group indisponible : l'app et le clavier ne peuvent pas communiquer. Réinstallez avec un outil qui provisionne les App Groups.")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(Color(hex: "#FF9F0A"))
-                        .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(Color(hex: "#30D158"))
+                        .frame(width: 7, height: 7)
+                    Text("Canal Clavier ↔ App : \(appGroup.activeIPCModeDescription)")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(Color(hex: "#30D158"))
                 }
+                .padding(.top, 2)
             }
 
             HStack(alignment: .center, spacing: 16) {
@@ -1203,7 +1355,7 @@ public struct ContentView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Releases GitHub v2.2.1 (.ipa & .apk)")
+                    Text("Releases GitHub \(autoUpdater.currentVersionBadge) (.ipa & .apk)")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(.white)
 

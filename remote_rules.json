@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "rulesRevision": 20261115,
+  "updatedAt": "2026-11-15T15:25:00Z",
+  "extraHallucinations": [
+    "[ Sous-titres ]",
+    "[Sous-titres]",
+    "Sous-titrage ST' 501",
+    "Sous-titrage Société Radio-Canada"
+  ],
+  "extraStandaloneHallucinations": [
+    "merci et à bientôt",
+    "n'oubliez pas de vous abonner",
+    "like and subscribe"
+  ],
+  "extraInlineVoiceCommands": {
+    "ouvrir la parenthèse": "(",
+    "fermer la parenthèse": ")",
+    "tiret": " - "
+  },
+  "extraInstantCorrectionsByLang": {
+    "fr": {
+      "jetais": "j'étais",
+      "cetait": "c'était",
+      "cest": "c'est",
+      "jai": "j'ai",
+      "jarrive": "j'arrive",
+      "ca": "ça",
+      "deja": "déjà",
+      "tres": "très",
+      "apres": "après",
+      "etre": "être",
+      "meme": "même",
+      "voila": "voilà",
+      "bientot": "bientôt",
+      "plutot": "plutôt",
+      "ecole": "école",
+      "telephone": "téléphone",
+      "probleme": "problème",
+      "desole": "désolé",
+      "francais": "français"
+    },
+    "en": {
+      "dont": "don't",
+      "cant": "can't",
+      "wont": "won't",
+      "im": "I'm",
+      "ive": "I've",
+      "youre": "you're",
+      "didnt": "didn't",
+      "doesnt": "doesn't"
+    }
+  }
+}

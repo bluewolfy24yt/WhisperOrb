@@ -23,9 +23,11 @@ public final class WhisperEngine: ObservableObject {
     private var whisperContext: OpaquePointer? = nil
     private var contextUsesGPU: Bool = false      // lu/écrit sur inferenceQueue
     private var isGPUBackendLoaded: Bool = false  // miroir pour le thread principal
+    private var isModelContextAllocatedOnMain: Bool = false // miroir thread-safe pour le thread principal
     private var shouldResumeAfterInterruption: Bool = false
     private var resumeListeningAfterTranscription: Bool = false
     private var loadingTier: WhisperModelTier? = nil
+    private var lastLocalPreviewAppendedLength: Int = 0
     private let inferenceQueue = DispatchQueue(label: "com.bluewolfy24yt.whisperorb.metal.inference", qos: .userInteractive)
     public let optimalThreadCount: Int = HardwareDetector.optimalThreadCount
     private var activeLangCString: UnsafeMutablePointer<CChar>? = nil
@@ -185,10 +187,26 @@ public final class WhisperEngine: ObservableObject {
             AppGroupManager.shared.clearEngineHeartbeat()
             AppGroupManager.shared.isBackgroundEngineActive = false
         } else if type == .ended {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            let attemptResume: (Int) -> Void = { [weak self] attempt in
                 guard let self = self, self.shouldResumeAfterInterruption else { return }
-                self.shouldResumeAfterInterruption = false
                 self.startEngineInternal()
+                if self.isBackgroundEngineRunning && self.audioEngine.isRunning {
+                    self.shouldResumeAfterInterruption = false
+                } else if attempt < 2 {
+                    let nextDelay: TimeInterval = (attempt == 0) ? 1.0 : 2.2
+                    DispatchQueue.main.asyncAfter(deadline: .now() + nextDelay) { [weak self] in
+                        guard let self = self, self.shouldResumeAfterInterruption else { return }
+                        self.startEngineInternal()
+                        if self.isBackgroundEngineRunning && self.audioEngine.isRunning {
+                            self.shouldResumeAfterInterruption = false
+                        } else if attempt == 1 {
+                            self.shouldResumeAfterInterruption = false
+                        }
+                    }
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) {
+                attemptResume(0)
             }
         }
     }
@@ -236,7 +254,7 @@ public final class WhisperEngine: ObservableObject {
             return
         }
         // Si le modèle a été libéré par une alerte mémoire en arrière-plan, on le recharge au retour
-        if whisperContext == nil {
+        if !isModelContextAllocatedOnMain {
             loadModel(tier, reloadBackend: true)
         }
     }
@@ -249,6 +267,7 @@ public final class WhisperEngine: ObservableObject {
         loadedTier = nil
         loadingTier = nil
         isGPUBackendLoaded = false
+        isModelContextAllocatedOnMain = false
         inferenceQueue.async { [weak self] in
             guard let self = self else { return }
             autoreleasepool {
@@ -280,7 +299,7 @@ public final class WhisperEngine: ObservableObject {
             return
         }
 
-        if !reloadBackend && ((loadedTier == tier && whisperContext != nil && !isLoadingModel) || (loadingTier == tier && isLoadingModel)) {
+        if !reloadBackend && ((loadedTier == tier && isModelContextAllocatedOnMain && !isLoadingModel) || (loadingTier == tier && isLoadingModel)) {
             return
         }
 
@@ -362,6 +381,7 @@ public final class WhisperEngine: ObservableObject {
                 let gpuLoaded = loadedSuccessfully && metalActive
                 DispatchQueue.main.async {
                     self.isGPUBackendLoaded = gpuLoaded
+                    self.isModelContextAllocatedOnMain = loadedSuccessfully
                     self.activeBackendLabel = gpuLoaded ? (flashEnabled ? "GPU Metal + FlashAttention" : "GPU Metal") : "CPU"
                     self.loadedTier = loadedSuccessfully ? tier : nil
                     self.loadingTier = nil
@@ -451,13 +471,16 @@ public final class WhisperEngine: ObservableObject {
     }
 
     public func startBackgroundAudioEngine() {
+        AppGroupManager.shared.ensureLoopbackServerRunning()
         if isBackgroundEngineRunning && audioEngine.isRunning {
             AppGroupManager.shared.recordEngineHeartbeat()
             AppGroupManager.shared.isBackgroundEngineActive = true
             let appGroup = AppGroupManager.shared
             let selectedTier = appGroup.selectedModel
-            if ModelDownloader.shared.isModelDownloaded(selectedTier) && whisperContext == nil && !isLoadingModel {
+            if ModelDownloader.shared.isModelDownloaded(selectedTier) && !isModelContextAllocatedOnMain && !isLoadingModel {
                 loadModel(selectedTier)
+            } else if ModelDownloader.shared.downloadedModels.isEmpty {
+                ModelDownloader.shared.ensureStarterModelAvailableOrDownload()
             }
             return
         }
@@ -477,13 +500,17 @@ public final class WhisperEngine: ObservableObject {
 
     private func startEngineInternal() {
         do {
+            AppGroupManager.shared.ensureLoopbackServerRunning()
             try configureAndActivateAudioSession()
 
+            ModelDownloader.shared.refreshDownloadedModels()
             let appGroup = AppGroupManager.shared
             let selectedTier = appGroup.selectedModel
-            if ModelDownloader.shared.isModelDownloaded(selectedTier) && whisperContext == nil && !isLoadingModel {
+            var hasAvailableModel = ModelDownloader.shared.isModelDownloaded(selectedTier)
+
+            if hasAvailableModel && !isModelContextAllocatedOnMain && !isLoadingModel {
                 loadModel(selectedTier)
-            } else if whisperContext == nil && !isLoadingModel,
+            } else if !hasAvailableModel,
                       let anyDownloaded = WhisperModelTier.allCases.first(where: {
                           ModelDownloader.shared.isModelDownloaded($0) &&
                           HardwareDetector.isTierUnlocked(
@@ -492,8 +519,13 @@ public final class WhisperEngine: ObservableObject {
                               forceUnlock: appGroup.forceUnlockAllModels
                           )
                       }) {
+                hasAvailableModel = true
                 appGroup.selectedModel = anyDownloaded
-                loadModel(anyDownloaded)
+                if !isModelContextAllocatedOnMain && !isLoadingModel {
+                    loadModel(anyDownloaded)
+                }
+            } else if !hasAvailableModel {
+                ModelDownloader.shared.ensureStarterModelAvailableOrDownload()
             }
 
             if audioEngine.isRunning {
@@ -524,7 +556,11 @@ public final class WhisperEngine: ObservableObject {
             startHeartbeatTimer()
             isBackgroundEngineRunning = true
             AppGroupManager.shared.isBackgroundEngineActive = true
-            statusBannerMessage = "Moteur Audio Tâche de Fond ACTIF — Prêt à dicter depuis le clavier"
+            if hasAvailableModel {
+                statusBannerMessage = "Moteur Audio Tâche de Fond ACTIF — Prêt à dicter depuis le clavier"
+            } else {
+                statusBannerMessage = "Téléchargement automatique du modèle IA en cours… Patientez quelques secondes"
+            }
             lastErrorMessage = nil
         } catch {
             lastErrorMessage = "Erreur d'activation audio : \(error.localizedDescription)"
@@ -540,7 +576,17 @@ public final class WhisperEngine: ObservableObject {
         heartbeatTimer?.invalidate()
         let timer = Timer(timeInterval: 2.5, repeats: true) { [weak self] _ in
             guard let self = self, self.isBackgroundEngineRunning else { return }
-            AppGroupManager.shared.recordEngineHeartbeat()
+            if !self.audioEngine.isRunning {
+                try? self.configureAndActivateAudioSession()
+                try? self.audioEngine.start()
+            }
+            if self.audioEngine.isRunning {
+                AppGroupManager.shared.recordEngineHeartbeat()
+            } else {
+                self.isBackgroundEngineRunning = false
+                AppGroupManager.shared.clearEngineHeartbeat()
+                AppGroupManager.shared.isBackgroundEngineActive = false
+            }
         }
         RunLoop.main.add(timer, forMode: .common)
         heartbeatTimer = timer
@@ -594,7 +640,7 @@ public final class WhisperEngine: ObservableObject {
         resumeListeningAfterTranscription = false
         let appGroup = AppGroupManager.shared
         let tier = appGroup.selectedModel
-        if whisperContext == nil && !isLoadingModel {
+        if !isModelContextAllocatedOnMain && !isLoadingModel {
             if ModelDownloader.shared.isModelDownloaded(tier) {
                 loadModel(tier)
             } else if let fallback = WhisperModelTier.allCases.first(where: {
@@ -608,8 +654,9 @@ public final class WhisperEngine: ObservableObject {
                 appGroup.selectedModel = fallback
                 loadModel(fallback)
             } else {
-                lastErrorMessage = "Veuillez d'abord télécharger l'un des modèles Whisper hors-ligne (Carte 2)."
-                statusBannerMessage = "Aucun modèle hors-ligne téléchargé"
+                ModelDownloader.shared.ensureStarterModelAvailableOrDownload()
+                lastErrorMessage = "Téléchargement automatique du modèle Whisper en cours… Patientez quelques secondes."
+                statusBannerMessage = "Téléchargement automatique du modèle IA en cours..."
                 appGroup.orbState = .idle
                 return
             }
@@ -994,6 +1041,7 @@ public final class WhisperEngine: ObservableObject {
                     self.activeBackendLabel = "CPU"
                 }
                 if contextLost {
+                    self.isModelContextAllocatedOnMain = false
                     self.loadedTier = nil
                 }
                 if rc == 0 {
@@ -1032,11 +1080,15 @@ public final class WhisperEngine: ObservableObject {
             return
         }
 
+        let appendedChunk: String
+        let trailingSpace = (AppGroupManager.shared.autoSpaceForGoodnotes && !finalResult.hasSuffix("\n")) ? " " : ""
         if liveTestTranscript.isEmpty || liveTestTranscript.hasSuffix("\n") || liveTestTranscript.hasSuffix(" ") {
-            liveTestTranscript += finalResult + (AppGroupManager.shared.autoSpaceForGoodnotes && !finalResult.hasSuffix("\n") ? " " : "")
+            appendedChunk = finalResult + trailingSpace
         } else {
-            liveTestTranscript += " " + finalResult + (AppGroupManager.shared.autoSpaceForGoodnotes && !finalResult.hasSuffix("\n") ? " " : "")
+            appendedChunk = " " + finalResult + trailingSpace
         }
+        liveTestTranscript += appendedChunk
+        lastLocalPreviewAppendedLength = appendedChunk.count
 
         AppGroupManager.shared.publishTranscribedText(finalResult)
         statusBannerMessage = "Transcrit en \(latencyMs) ms • Envoyé au clavier"
@@ -1046,7 +1098,7 @@ public final class WhisperEngine: ObservableObject {
         var text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
 
-        // 1. Filtrage des hallucinations connues de Whisper sur les silences (FR / EN / International)
+        // 1. Filtrage des hallucinations connues de Whisper sur les silences (FR / EN / International + OTA GitHub)
         let hallucinationPatterns: [String] = [
             "[BLANK_AUDIO]",
             "[blank_audio]",
@@ -1062,7 +1114,7 @@ public final class WhisperEngine: ObservableObject {
             "Sous-titres réalisés par la communauté d'Amara.org",
             "Sous-titres réalisés",
             "Subtitles by the Amara.org community"
-        ]
+        ] + RemoteRulesSyncManager.shared.extraHallucinations()
 
         for pattern in hallucinationPatterns {
             text = text.replacingOccurrences(of: pattern, with: "", options: [.caseInsensitive])
@@ -1078,11 +1130,14 @@ public final class WhisperEngine: ObservableObject {
             .trimmingCharacters(in: CharacterSet.punctuationCharacters.union(.whitespacesAndNewlines))
 
         // Ces phrases sont de vrais mots : on ne les filtre que si elles sont seules.
-        let standaloneHallucinations: Set<String> = [
+        var standaloneHallucinations: Set<String> = [
             "thank you for watching", "thanks for watching",
             "merci d'avoir regardé cette vidéo", "merci d'avoir regardé",
             "abonnez-vous", "s'abonner"
         ]
+        for extra in RemoteRulesSyncManager.shared.extraStandaloneHallucinations() {
+            standaloneHallucinations.insert(extra.lowercased())
+        }
         if standaloneHallucinations.contains(lower) {
             return nil
         }
@@ -1125,7 +1180,7 @@ public final class WhisperEngine: ObservableObject {
         }
 
         // 4. Remplacement des commandes vocales intégrées au milieu d'une dictée
-        let inlineReplacements: [(pattern: String, replacement: String)] = [
+        var inlineReplacements: [(pattern: String, replacement: String)] = [
             ("double saut de ligne", "\n\n"),
             ("nouveau paragraphe", "\n"),
             ("new paragraph", "\n"),
@@ -1142,6 +1197,9 @@ public final class WhisperEngine: ObservableObject {
             ("deux-points", ":"),
             ("point final", ".")
         ]
+        for (otaSpoken, otaRepl) in RemoteRulesSyncManager.shared.extraInlineVoiceCommands() {
+            inlineReplacements.append((otaSpoken, otaRepl))
+        }
 
         for item in inlineReplacements {
             let wholeWordPattern = "(?i)(?<![\\p{L}\\p{N}])"
@@ -1187,7 +1245,10 @@ public final class WhisperEngine: ObservableObject {
     }
 
     private func removeLastSentenceFromLocalPreview() {
-        let length = AppGroupManager.shared.lastInsertedSentenceLength
+        let length = lastLocalPreviewAppendedLength > 0
+            ? lastLocalPreviewAppendedLength
+            : AppGroupManager.shared.lastInsertedSentenceLength
+        lastLocalPreviewAppendedLength = 0
         guard length > 0 else { return }
         guard liveTestTranscript.count >= length else {
             liveTestTranscript = ""

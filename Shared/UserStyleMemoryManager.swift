@@ -91,10 +91,14 @@ public final class UserStyleMemoryManager: ObservableObject {
     public static let shared = UserStyleMemoryManager()
 
     public static let fileName = "user_style_memory.json"
+    public static let darwinStyleMemoryUpdatedNotification = "com.bluewolfy24yt.whisperorb.styleMemoryUpdated"
     private static let enabledKey = "whisperorb.styleMemoryEnabled"
 
     @Published public var memory: UserStyleMemoryPayload {
         didSet {
+            snapshotLock.lock()
+            cachedMemorySnapshot = memory
+            snapshotLock.unlock()
             if !isReloadingFromDisk && oldValue != memory {
                 saveToDisk()
             }
@@ -103,6 +107,9 @@ public final class UserStyleMemoryManager: ObservableObject {
 
     @Published public var isMemoryEnabled: Bool = true {
         didSet {
+            snapshotLock.lock()
+            cachedEnabledSnapshot = isMemoryEnabled
+            snapshotLock.unlock()
             guard !isReloadingFromDisk, oldValue != isMemoryEnabled else { return }
             sharedDefaults.set(isMemoryEnabled, forKey: Self.enabledKey)
             UserDefaults.standard.set(isMemoryEnabled, forKey: Self.enabledKey)
@@ -112,15 +119,21 @@ public final class UserStyleMemoryManager: ObservableObject {
         }
     }
 
+    private let snapshotLock = NSLock()
+    private var cachedMemorySnapshot = UserStyleMemoryPayload()
+    private var cachedEnabledSnapshot: Bool = false
     private let sharedDefaults: UserDefaults
     private var isReloadingFromDisk = false
     private var lastLoadedModificationDate: Date?
+    private var lastNonAppGroupReloadAt: TimeInterval = 0
 
     private static var resolvedContainerURL: URL {
         if let groupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: AppGroupManager.appGroupIdentifier) {
             return groupURL
         }
-        return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let docsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        try? FileManager.default.createDirectory(at: docsURL, withIntermediateDirectories: true)
+        return docsURL
     }
 
     public var memoryFileURL: URL {
@@ -140,7 +153,9 @@ public final class UserStyleMemoryManager: ObservableObject {
             // Désactivé par défaut : « beaucoup » ne doit pas devenir « bcp » sans demande explicite
             initialEnabled = false
         }
-        self.isMemoryEnabled = initialEnabled
+        var resolvedEnabled = initialEnabled
+        let resolvedMemory: UserStyleMemoryPayload
+        var pendingSavePayload: UserStyleMemoryPayload? = nil
 
         let fileURL = Self.resolvedContainerURL.appendingPathComponent(Self.fileName, isDirectory: false)
         if let data = try? Data(contentsOf: fileURL),
@@ -152,32 +167,113 @@ public final class UserStyleMemoryManager: ObservableObject {
                 needsMigrationSave = true
             }
             if let payloadEnabled = decoded.isEnabled {
-                self.isMemoryEnabled = payloadEnabled
+                resolvedEnabled = payloadEnabled
                 defaults.set(payloadEnabled, forKey: Self.enabledKey)
             } else {
                 decoded.isEnabled = initialEnabled
                 needsMigrationSave = true
             }
-            self.memory = decoded
+            resolvedMemory = decoded
             if needsMigrationSave {
-                savePayloadToDisk(decoded, url: fileURL)
+                pendingSavePayload = decoded
             }
         } else {
             let initial = UserStyleMemoryPayload(isEnabled: initialEnabled)
-            self.memory = initial
-            savePayloadToDisk(initial, url: fileURL)
+            resolvedMemory = initial
+            pendingSavePayload = initial
+        }
+
+        self.memory = resolvedMemory
+        self.isReloadingFromDisk = true
+        self.cachedEnabledSnapshot = resolvedEnabled
+        self.cachedMemorySnapshot = resolvedMemory
+        self.isMemoryEnabled = resolvedEnabled
+        self.isReloadingFromDisk = false
+
+        if let toSave = pendingSavePayload {
+            savePayloadToDisk(toSave, url: fileURL, broadcastDarwin: false)
+        }
+
+        registerDarwinStyleMemoryObserver()
+    }
+
+    deinit {
+        let center = CFNotificationCenterGetDarwinNotifyCenter()
+        CFNotificationCenterRemoveEveryObserver(center, Unmanaged.passUnretained(self).toOpaque())
+    }
+
+    private func registerDarwinStyleMemoryObserver() {
+        let center = CFNotificationCenterGetDarwinNotifyCenter()
+        let observerPtr = Unmanaged.passUnretained(self).toOpaque()
+        CFNotificationCenterAddObserver(
+            center,
+            observerPtr,
+            { _, observer, _, _, _ in
+                guard let observer = observer else { return }
+                let manager = Unmanaged<UserStyleMemoryManager>.fromOpaque(observer).takeUnretainedValue()
+                DispatchQueue.main.async {
+                    manager.reloadFromDisk(force: true)
+                }
+            },
+            Self.darwinStyleMemoryUpdatedNotification as CFString,
+            nil,
+            .deliverImmediately
+        )
+    }
+
+    public var threadSafeUpdatedAt: TimeInterval {
+        snapshotLock.lock()
+        defer { snapshotLock.unlock() }
+        return cachedMemorySnapshot.updatedAt
+    }
+
+    public func rawJSONData() -> Data? {
+        snapshotLock.lock()
+        let snap = cachedMemorySnapshot
+        snapshotLock.unlock()
+        return try? JSONEncoder().encode(snap)
+    }
+
+    public func applyRemoteStyleMemoryData(_ data: Data) {
+        guard let decoded = try? JSONDecoder().decode(UserStyleMemoryPayload.self, from: data) else { return }
+        snapshotLock.lock()
+        let currentSnap = cachedMemorySnapshot
+        snapshotLock.unlock()
+        guard decoded.updatedAt > currentSnap.updatedAt || decoded != currentSnap else { return }
+        let applyOnMain = {
+            self.isReloadingFromDisk = true
+            defer { self.isReloadingFromDisk = false }
+            if let payloadEnabled = decoded.isEnabled, payloadEnabled != self.isMemoryEnabled {
+                self.isMemoryEnabled = payloadEnabled
+            }
+            if self.memory != decoded {
+                self.memory = decoded
+            }
+            try? data.write(to: self.memoryFileURL, options: [.atomic])
+        }
+        if Thread.isMainThread {
+            applyOnMain()
+        } else {
+            DispatchQueue.main.async(execute: applyOnMain)
         }
     }
 
-    public func reloadFromDisk() {
+    public func reloadFromDisk(force: Bool = false) {
         let hasAppGroup = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: AppGroupManager.appGroupIdentifier) != nil
         if hasAppGroup {
             let attributes = try? FileManager.default.attributesOfItem(atPath: memoryFileURL.path)
             let modificationDate = attributes?[.modificationDate] as? Date
-            if let modificationDate = modificationDate, modificationDate == lastLoadedModificationDate {
+            if !force, let modificationDate = modificationDate, modificationDate == lastLoadedModificationDate {
                 return
             }
             lastLoadedModificationDate = modificationDate
+        } else {
+            // Évite d'interroger le Keychain toutes les 1,0 s sur le thread principal pendant la frappe au clavier
+            let now = Date().timeIntervalSince1970
+            if !force && (now - lastNonAppGroupReloadAt) < 30.0 {
+                return
+            }
+            lastNonAppGroupReloadAt = now
         }
 
         let decoder = JSONDecoder()
@@ -213,16 +309,27 @@ public final class UserStyleMemoryManager: ObservableObject {
         var updated = memory
         updated.isEnabled = isMemoryEnabled
         updated.updatedAt = Date().timeIntervalSince1970
-        savePayloadToDisk(updated, url: memoryFileURL)
+        savePayloadToDisk(updated, url: memoryFileURL, broadcastDarwin: true)
     }
 
-    private func savePayloadToDisk(_ payload: UserStyleMemoryPayload, url: URL) {
+    private func savePayloadToDisk(_ payload: UserStyleMemoryPayload, url: URL, broadcastDarwin: Bool) {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         if let data = try? encoder.encode(payload) {
+            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try? data.write(to: url, options: [.atomic])
             if FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: AppGroupManager.appGroupIdentifier) == nil {
                 AppGroupManager.saveSharedKeychainData(data, account: Self.fileName)
+            }
+            if broadcastDarwin {
+                let center = CFNotificationCenterGetDarwinNotifyCenter()
+                CFNotificationCenterPostNotification(
+                    center,
+                    CFNotificationName(Self.darwinStyleMemoryUpdatedNotification as CFString),
+                    nil,
+                    nil,
+                    true
+                )
             }
         }
     }
@@ -230,7 +337,12 @@ public final class UserStyleMemoryManager: ObservableObject {
     // MARK: - Application Ultra-Rapide (< 0,05 ms) sur le Texte Transcrit
 
     public func applyStyleMemory(to input: String, languageCode: String) -> String {
-        guard isMemoryEnabled else { return input }
+        snapshotLock.lock()
+        let enabled = cachedEnabledSnapshot
+        let snap = cachedMemorySnapshot
+        snapshotLock.unlock()
+
+        guard enabled else { return input }
         var result = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !result.isEmpty else { return result }
 
@@ -240,7 +352,7 @@ public final class UserStyleMemoryManager: ObservableObject {
             : normalizedLang
 
         // 1. Remplacements spécifiques à la langue active (triés du plus long au plus court)
-        if let langMap = memory.replacementsByLanguage[effectiveLang] {
+        if let langMap = snap.replacementsByLanguage[effectiveLang] {
             let sortedPairs = langMap.sorted { $0.key.count > $1.key.count }
             for (spoken, written) in sortedPairs where !spoken.isEmpty {
                 result = replaceWholePhraseCaseInsensitive(in: result, target: spoken, replacement: written)
@@ -248,24 +360,24 @@ public final class UserStyleMemoryManager: ObservableObject {
         }
 
         // 2. Corrections apprises globalement
-        if !memory.learnedCorrections.isEmpty {
-            let sortedLearned = memory.learnedCorrections.sorted { $0.key.count > $1.key.count }
+        if !snap.learnedCorrections.isEmpty {
+            let sortedLearned = snap.learnedCorrections.sorted { $0.key.count > $1.key.count }
             for (spoken, written) in sortedLearned where !spoken.isEmpty {
                 result = replaceWholePhraseCaseInsensitive(in: result, target: spoken, replacement: written)
             }
         }
 
         // 3. Suppression du point final sur les messages courts (style SMS / Discord / WhatsApp)
-        if memory.stripTrailingPeriodOnShortMessages {
+        if snap.stripTrailingPeriodOnShortMessages {
             let words = result.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
-            if words.count <= memory.shortMessageMaxWords && result.hasSuffix(".") && !result.hasSuffix("...") {
+            if words.count <= snap.shortMessageMaxWords && result.hasSuffix(".") && !result.hasSuffix("...") {
                 result.removeLast()
             }
         }
 
         // 4. Préférence de majuscule en début de message
         if let first = result.first, first.isLetter {
-            if memory.autoCapitalizeStart {
+            if snap.autoCapitalizeStart {
                 result = first.uppercased() + result.dropFirst()
             } else {
                 result = first.lowercased() + result.dropFirst()

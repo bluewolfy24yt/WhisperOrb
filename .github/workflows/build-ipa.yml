@@ -1,4 +1,4 @@
-name: Build & Release WhisperOrb v2.2.1 (.ipa & .apk)
+name: Build & Auto-Release WhisperOrb v2.3 (.ipa, .apk & Auto-Update Feed)
 
 on:
   push:
@@ -51,32 +51,8 @@ jobs:
           path: WhisperOrb-Android.apk
           if-no-files-found: error
 
-      - name: 7. Publish Android APK to GitHub Release v2.2.1
-        if: github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v2.2.1
-          name: "WhisperOrb v2.2.1 — Clavier Gboard/HeliBoard Natif avec Bandeau Incrusté (.apk & .ipa)"
-          body: |
-            ## 🫧 WhisperOrb `v2.2.1` — Clavier Gboard/HeliBoard Complet Intégré + Bandeau Incrusté dans le Code Source du Clavier
-
-            ### 🇫🇷 Nouveautés Majeures (`v2.2.1`)
-            - ⌨️ **Moteur Clavier Gboard / HeliBoard v3.2 Complet Intégré dans `WhisperOrb-Android.apk`** :
-              1. **Bandeau WhisperOrb physiquement soudé DANS le code source du clavier (`main_keyboard_frame.xml` / `LatinIME`)** : zéro fenêtre flottante, zéro calcul de coordonnées écran, alignement parfait au pixel près au sommet du clavier.
-              2. **Écriture Glissée (Swipe / Glide Typing) native pré-intégrée** (`libjni_latinimegoogle.so` arm64-v8a embarquée d'office).
-              3. **Détection automatique de la langue système dès la 1ère seconde** : **AZERTY (Français)** + dictionnaire hors-ligne FR si le téléphone est en français, **QWERTY (English)** + dictionnaire hors-ligne EN si en anglais, avec support bilingue FR/EN, barre de suggestions/autocorrect, sélecteur d'Emojis et Presse-papiers.
-              4. **3 États natifs dans le clavier** :
-                 - **Normal** : Bandeau WhisperOrb en haut + Barre de suggestions Gboard + Touches AZERTY/QWERTY.
-                 - **Réduit (`▾ Réduire`)** : replie les touches en interne (`View.GONE`) et redimensionne nativement la fenêtre du clavier Android (`onComputeInsets`) à `58dp` en bas de l'écran.
-                 - **Réglages (`⚙`)** : ouvre le panneau de réglages rapides WhisperOrb (Langues, 7 Modèles IA, Envoi auto, 32 Couleurs d'Orbe) directement à la place des touches.
-              5. **Bouton ON/OFF en temps réel (Carte 1)** : affiche ou masque instantanément le bandeau en haut du clavier intégré, plus option **Bulle Flottante Universelle** indépendante.
-          files: WhisperOrb-Android.apk
-          draft: false
-          prerelease: false
-          make_latest: true
-
   build-ipa:
-    name: Compile Unsigned iPadOS/iOS IPA on macOS 15
+    name: Compile Unsigned iPadOS/iOS IPA on macOS 15 + Auto-Update Manifests
     runs-on: macos-15
     steps:
       - name: 1. Checkout Repository
@@ -96,10 +72,15 @@ jobs:
           rm -rf Frameworks/whisper.xcframework
           mv /tmp/build-apple/whisper.xcframework Frameworks/whisper.xcframework
 
-      - name: 4. Generate Xcode Project via XcodeGen
+      - name: 4. Stamp Version & Generate Xcode Project via XcodeGen
         run: |
+          RELEASE_VERSION="2.3.${GITHUB_RUN_NUMBER}"
+          plutil -replace CFBundleShortVersionString -string "$RELEASE_VERSION" WhisperOrbApp/Info.plist
+          plutil -replace CFBundleShortVersionString -string "$RELEASE_VERSION" WhisperKeyboard/Info.plist
           plutil -replace CFBundleVersion -string "$GITHUB_RUN_NUMBER" WhisperOrbApp/Info.plist
           plutil -replace CFBundleVersion -string "$GITHUB_RUN_NUMBER" WhisperKeyboard/Info.plist
+          plutil -lint WhisperOrbApp/Info.plist
+          plutil -lint WhisperKeyboard/Info.plist
           xcodegen generate
 
       - name: 5. Build Release for iphoneos (Unsigned / Ad-Hoc)
@@ -116,32 +97,157 @@ jobs:
             AD_HOC_CODE_SIGNING_ALLOWED=YES \
             COMPILER_INDEX_STORE_ENABLE=NO
 
-      - name: 6. Package .app into WhisperOrb-iPad.ipa
+      - name: 6. Package WhisperOrb-iPad.ipa & Generate Auto-Update Manifests
+        env:
+          REPO_SLUG: ${{ github.repository }}
+          RUN_NUM: ${{ github.run_number }}
         run: |
+          rm -rf Payload
           mkdir -p Payload
           APP_PATH=$(find build_output -name "WhisperOrbApp.app" -type d | head -n 1)
           if [ -z "$APP_PATH" ]; then
             echo "Erreur : WhisperOrbApp.app introuvable !"
             exit 1
           fi
+          if [ ! -d "$APP_PATH/PlugIns/WhisperKeyboard.appex" ]; then
+            echo "Erreur : Extension WhisperKeyboard.appex manquante dans le bundle !"
+            exit 1
+          fi
           cp -R "$APP_PATH" Payload/
           zip -r9 WhisperOrb-iPad.ipa Payload
           ls -lh WhisperOrb-iPad.ipa
 
-      - name: 7. Upload IPA as Workflow Artifact
+          python3 - <<'EOF'
+          import datetime
+          import json
+          import os
+
+          repo = os.environ["REPO_SLUG"]
+          run_num = int(os.environ["RUN_NUM"])
+          version = f"2.3.{run_num}"
+          tag_name = f"v{version}"
+          ipa_size = os.path.getsize("WhisperOrb-iPad.ipa")
+          now_iso = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+          ipa_url = f"https://github.com/{repo}/releases/download/{tag_name}/WhisperOrb-iPad.ipa"
+          source_url = f"https://github.com/{repo}/releases/latest/download/altstore-source.json"
+          icon_url = f"https://raw.githubusercontent.com/{repo}/main/WhisperOrbApp/Assets.xcassets/AppIcon.appiconset/Icon-1024.png"
+
+          notes = (
+              f"WhisperOrb v{version} (build {run_num}) — Pont IPC universel 127.0.0.1 pour iPadOS/iOS, "
+              "téléchargement fiable des modèles Whisper sur tous les sideloaders, mise en page iPad "
+              "Split View/Stage Manager corrigée et mises à jour automatiques GitHub."
+          )
+
+          version_manifest = {
+              "version": version,
+              "buildNumber": run_num,
+              "tagName": tag_name,
+              "ipaDownloadURL": ipa_url,
+              "ipaSizeBytes": ipa_size,
+              "altstoreSourceURL": source_url,
+              "releaseNotes": notes,
+              "publishedAt": now_iso,
+          }
+          with open("version.json", "w", encoding="utf-8") as f:
+              json.dump(version_manifest, f, indent=2, ensure_ascii=False)
+
+          altstore_source = {
+              "name": "WhisperOrb Official Source",
+              "identifier": "com.bluewolfy24yt.whisperorb.source",
+              "subtitle": "Clavier Vocal IA 100 % Hors-Ligne (whisper.cpp Metal GPU) pour iPad & iPhone",
+              "description": "Source officielle de mises à jour automatiques en arrière-plan (SideStore, AltStore, Feather) pour WhisperOrb.",
+              "sourceURL": source_url,
+              "website": f"https://github.com/{repo}",
+              "tintColor": "#0A84FF",
+              "featuredApps": ["com.bluewolfy24yt.whisperorb"],
+              "apps": [
+                  {
+                      "name": "WhisperOrb",
+                      "bundleIdentifier": "com.bluewolfy24yt.whisperorb",
+                      "developerName": "bluewolfy24yt",
+                      "subtitle": "Dictée vocale IA hors-ligne & clavier intelligent iPadOS / iOS",
+                      "localizedDescription": notes,
+                      "iconURL": icon_url,
+                      "tintColor": "#0A84FF",
+                      "category": "utilities",
+                      "appPermissions": {
+                          "entitlements": [
+                              "com.apple.security.application-groups"
+                          ],
+                          "privacy": {
+                              "NSMicrophoneUsageDescription": "WhisperOrb transcrit votre voix localement 100 % hors-ligne."
+                          }
+                      },
+                      "versions": [
+                          {
+                              "version": version,
+                              "buildVersion": str(run_num),
+                              "date": now_iso,
+                              "localizedDescription": notes,
+                              "downloadURL": ipa_url,
+                              "size": ipa_size,
+                              "minOSVersion": "16.4"
+                          }
+                      ]
+                  }
+              ],
+              "news": []
+          }
+          with open("altstore-source.json", "w", encoding="utf-8") as f:
+              json.dump(altstore_source, f, indent=2, ensure_ascii=False)
+          EOF
+
+          cat version.json
+
+      - name: 7. Upload IPA & Auto-Update Manifests as Workflow Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: WhisperOrb-iPad-IPA
-          path: WhisperOrb-iPad.ipa
+          name: WhisperOrb-iPad-Release
+          path: |
+            WhisperOrb-iPad.ipa
+            version.json
+            altstore-source.json
           if-no-files-found: error
 
-      - name: 8. Publish Apple IPA to GitHub Release v2.2.1
-        if: github.ref == 'refs/heads/main'
+  publish-release:
+    name: Publish Atomic GitHub Release (.ipa + version.json + altstore-source.json + .apk)
+    needs: [build-ipa, build-android]
+    if: always() && github.ref == 'refs/heads/main' && needs.build-ipa.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1. Download iPadOS Release Bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: WhisperOrb-iPad-Release
+          path: release_assets
+
+      - name: 2. Download Android APK (if built)
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: WhisperOrb-Android-APK
+          path: release_assets
+
+      - name: 3. Publish Latest GitHub Release v2.3.${{ github.run_number }}
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.2.1
-          name: "WhisperOrb v2.2.1 — Clavier Gboard/HeliBoard Natif avec Bandeau Incrusté (.apk & .ipa)"
-          files: WhisperOrb-iPad.ipa
+          tag_name: v2.3.${{ github.run_number }}
+          name: "WhisperOrb v2.3.${{ github.run_number }} — Correctif Complet iPadOS + Mises à Jour Auto GitHub (.ipa & .apk)"
+          body: |
+            ## 🫧 WhisperOrb `v2.3.${{ github.run_number }}` — Correctif Intégral iPadOS + Mises à Jour Automatiques GitHub
+
+            ### 🍏 Nouveautés & Correctifs Majeurs iPadOS / iOS (`WhisperOrb-iPad.ipa`)
+            - 🔗 **Pont IPC Universel `127.0.0.1` (`LocalLoopbackIPC`)** : communication instantanée entre `WhisperOrbApp` et `WhisperKeyboard` sur **100 % des outils de sideloading** (Sideloadly gratuit sans App Group, AltStore, SideStore, Feather, ESign, TrollStore).
+            - 📥 **Téléchargement fiable des modèles IA Whisper** : remplacement de `URLSessionConfiguration.background` (qui bloquait à 0 % après re-signature du Bundle ID) par une session directe protégée en arrière-plan + téléchargement automatique de **Whisper Flash (~57 Mo)** dès le premier lancement.
+            - ⌨️ **Clavier iPad corrigé de bout en bout** :
+              - Suppression de la zone morte `450..<500 pt` en Split View / Stage Manager (touche `⌄` de repli clavier toujours présente sur iPad).
+              - Suppression du gel de `1.0 s` sur le thread principal lors de la frappe rapide à deux mains.
+              - Correction de la suppression excessive lors de la commande vocale *« Effacer la dernière phrase »*, du faux `". "` après autocorrection et des caractères accentués Unicode NFD.
+              - L'orbe 3D du clavier ouvre automatiquement l'app si le moteur vocal est éteint, si aucun modèle n'est installé ou si *Autoriser l'accès complet* est désactivé, et dicte directement sur place dès que le moteur tourne.
+            - 🔄 **Mises à Jour Automatiques depuis GitHub** :
+              - **0-Clic total** via `altstore-source.json` (SideStore / AltStore / Feather) + synchronisation OTA silencieuse de `remote_rules.json` (dictionnaires & filtres vocaux).
+              - **Auto-téléchargement intégré (`AutoUpdateManager`)** : télécharge automatiquement la dernière `WhisperOrb-iPad.ipa` depuis `version.json` et lance l'installation directe.
+          files: release_assets/*
           draft: false
           prerelease: false
           make_latest: true

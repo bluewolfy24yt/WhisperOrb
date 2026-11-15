@@ -23,20 +23,20 @@ public final class KeyboardViewController: UIInputViewController {
     }
 
     private var desiredKeyboardHeight: CGFloat {
-        // La largeur réelle compte : sur iPad, le clavier peut être plein écran (≥ 500 pt),
-        // en Slide Over (~320-375 pt) ou en mode Clavier Flottant iPadOS (< 450 pt, plafonné à ~254 pt par le système).
+        // La largeur réelle compte : sur iPad, le clavier peut être plein écran / Split View (≥ 450 pt),
+        // ou en mode Clavier Flottant / Slide Over étroit (< 450 pt, plafonné à ~254 pt par iPadOS).
         let width = view.bounds.width
         let isPadIdiom = UIDevice.current.userInterfaceIdiom == .pad
-        let isWidePad = isPadIdiom && (width == 0 || width >= 500)
         let isFloatingPad = isPadIdiom && width > 0 && width < 450
+        let isRegularPad = isPadIdiom && !isFloatingPad
         if AppGroupManager.shared.isKeyboardCollapsed {
             if isFloatingPad { return 56.0 }
-            return isWidePad ? 68.0 : 62.0
+            return isRegularPad ? 68.0 : 62.0
         }
         if isFloatingPad {
             return 248.0
         }
-        return isWidePad ? 328.0 : 286.0
+        return isRegularPad ? 328.0 : 286.0
     }
 
     public override func viewDidLoad() {
@@ -193,9 +193,7 @@ public final class KeyboardViewController: UIInputViewController {
             let finalInsert = needsLeadingSpace ? (" " + rawTextToInsert) : rawTextToInsert
             textDocumentProxy.insertText(finalInsert)
             lastDictatedText = finalInsert
-            if needsLeadingSpace {
-                AppGroupManager.shared.lastInsertedSentenceLength = finalInsert.count
-            }
+            AppGroupManager.shared.updateInsertedSentenceLengthFromKeyboard(finalInsert.count)
             NotificationCenter.default.post(name: Self.textDidChangeNotification, object: finalInsert)
         }
     }
@@ -212,12 +210,25 @@ public final class KeyboardViewController: UIInputViewController {
 
     public func deleteLastDictatedSentence(length: Int) {
         guard length > 0 else { return }
-        // Le curseur ou le champ a changé : la phrase dictée n'est plus juste avant le curseur
         let context = textDocumentProxy.documentContextBeforeInput ?? ""
-        let isStillBeforeCursor = !lastDictatedText.isEmpty && !context.isEmpty
-            && (context.hasSuffix(lastDictatedText) || lastDictatedText.hasSuffix(context))
-        if isStillBeforeCursor {
-            for _ in 0..<length {
+        var charsToDelete = 0
+
+        if !lastDictatedText.isEmpty && !context.isEmpty {
+            if context.hasSuffix(lastDictatedText) {
+                charsToDelete = lastDictatedText.count
+            } else if lastDictatedText.contains("\n") {
+                // Certaines apps ne retournent que le dernier paragraphe dans documentContextBeforeInput
+                let lastLine = lastDictatedText.components(separatedBy: "\n").last ?? ""
+                if !lastLine.isEmpty && context == lastLine {
+                    charsToDelete = lastDictatedText.count
+                }
+            }
+        } else if lastDictatedText.isEmpty && context.count >= length {
+            charsToDelete = length
+        }
+
+        if charsToDelete > 0 {
+            for _ in 0..<charsToDelete {
                 textDocumentProxy.deleteBackward()
             }
         }

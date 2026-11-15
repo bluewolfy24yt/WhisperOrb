@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import Combine
 
 public final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDelegate {
@@ -11,35 +12,59 @@ public final class ModelDownloader: NSObject, ObservableObject, URLSessionDownlo
 
     private var downloadTasks: [WhisperModelTier: URLSessionDownloadTask] = [:]
     private var taskToTierMap: [Int: WhisperModelTier] = [:]
+    private var resumeDataByTier: [WhisperModelTier: Data] = [:]
+    private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
+
+    /// Session in-process compatible à 100 % avec tous les outils de sideloading (Sideloadly, AltStore, SideStore, Feather, ESign).
+    /// Une session `.background` (`nsurlsessiond`) se bloque à 0 % ou échoue (-997) lorsque le Bundle ID est réécrit au re-signing.
     private lazy var urlSession: URLSession = {
-        // Session d'arrière-plan : le téléchargement continue quand l'utilisateur quitte l'app
-        let config = URLSessionConfiguration.background(withIdentifier: "com.bluewolfy24yt.whisperorb.models")
-        config.isDiscretionary = false
-        config.sessionSendsLaunchEvents = true
-        config.timeoutIntervalForResource = 24 * 3600
+        let config = URLSessionConfiguration.default
+        config.waitsForConnectivity = true
+        config.timeoutIntervalForRequest = 90
+        config.timeoutIntervalForResource = 4 * 3600
+        config.httpMaximumConnectionsPerHost = 2
         return URLSession(configuration: config, delegate: self, delegateQueue: .main)
     }()
 
     public override init() {
         super.init()
         refreshDownloadedModels()
-        // Reprend le suivi des téléchargements poursuivis par le système pendant l'absence de l'app
-        urlSession.getAllTasks { tasks in
-            DispatchQueue.main.async {
-                for case let task as URLSessionDownloadTask in tasks {
-                    guard let tier = self.tier(for: task) else { continue }
-                    self.activeDownloads.insert(tier)
-                    self.downloadTasks[tier] = task
-                    self.taskToTierMap[task.taskIdentifier] = tier
-                }
-            }
-        }
     }
 
     private func tier(for task: URLSessionTask) -> WhisperModelTier? {
         if let known = taskToTierMap[task.taskIdentifier] { return known }
         let fileName = task.originalRequest?.url?.lastPathComponent
         return WhisperModelTier.allCases.first { $0.fileName == fileName }
+    }
+
+    private func beginBackgroundProtectionIfNeeded() {
+        guard backgroundTaskID == .invalid else { return }
+        backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "WhisperOrbModelDownload") { [weak self] in
+            self?.endBackgroundProtection()
+        }
+    }
+
+    private func endBackgroundProtectionIfIdle() {
+        guard activeDownloads.isEmpty else { return }
+        endBackgroundProtection()
+    }
+
+    private func endBackgroundProtection() {
+        guard backgroundTaskID != .invalid else { return }
+        let id = backgroundTaskID
+        backgroundTaskID = .invalid
+        UIApplication.shared.endBackgroundTask(id)
+    }
+
+    /// Au tout premier lancement, télécharge automatiquement Whisper Flash (~57 Mo) pour que le clavier fonctionne immédiatement.
+    public func ensureStarterModelAvailableOrDownload() {
+        refreshDownloadedModels()
+        guard downloadedModels.isEmpty, activeDownloads.isEmpty else { return }
+        let starterTier: WhisperModelTier = .eclair
+        if AppGroupManager.shared.selectedModel != starterTier {
+            AppGroupManager.shared.selectedModel = starterTier
+        }
+        downloadModel(starterTier)
     }
 
     // MARK: - Chemins Locaux & Protection Hors-Ligne (Exclusion Backup iCloud / Purge iPadOS)
@@ -120,13 +145,21 @@ public final class ModelDownloader: NSObject, ObservableObject, URLSessionDownlo
         }
 
         errorMessage = nil
-        downloadProgress[tier] = 0.0
+        if downloadProgress[tier] == nil {
+            downloadProgress[tier] = 0.0
+        }
         activeDownloads.insert(tier)
+        beginBackgroundProtectionIfNeeded()
 
-        var request = URLRequest(url: tier.downloadURL)
-        request.cachePolicy = .reloadIgnoringLocalCacheData
+        let task: URLSessionDownloadTask
+        if let resumeData = resumeDataByTier.removeValue(forKey: tier) {
+            task = urlSession.downloadTask(withResumeData: resumeData)
+        } else {
+            var request = URLRequest(url: tier.downloadURL)
+            request.cachePolicy = .reloadIgnoringLocalCacheData
+            task = urlSession.downloadTask(with: request)
+        }
 
-        let task = urlSession.downloadTask(with: request)
         downloadTasks[tier] = task
         taskToTierMap[task.taskIdentifier] = tier
         task.resume()
@@ -138,8 +171,10 @@ public final class ModelDownloader: NSObject, ObservableObject, URLSessionDownlo
             task.cancel()
             downloadTasks.removeValue(forKey: tier)
         }
+        resumeDataByTier.removeValue(forKey: tier)
         activeDownloads.remove(tier)
         downloadProgress.removeValue(forKey: tier)
+        endBackgroundProtectionIfIdle()
     }
 
     public func deleteModel(_ tier: WhisperModelTier) {
@@ -194,6 +229,7 @@ public final class ModelDownloader: NSObject, ObservableObject, URLSessionDownlo
                 self.downloadProgress.removeValue(forKey: tier)
                 self.downloadTasks.removeValue(forKey: tier)
                 self.taskToTierMap.removeValue(forKey: downloadTask.taskIdentifier)
+                self.endBackgroundProtectionIfIdle()
             }
             return
         }
@@ -219,16 +255,17 @@ public final class ModelDownloader: NSObject, ObservableObject, URLSessionDownlo
 
             DispatchQueue.main.async {
                 self.downloadProgress[tier] = 1.0
+                self.resumeDataByTier.removeValue(forKey: tier)
                 self.activeDownloads.remove(tier)
                 self.downloadTasks.removeValue(forKey: tier)
                 self.taskToTierMap.removeValue(forKey: downloadTask.taskIdentifier)
+                self.endBackgroundProtectionIfIdle()
                 self.refreshDownloadedModels()
-                // Sélectionne et charge automatiquement le modèle qui vient d'être téléchargé
+                // Sélectionne et charge systématiquement le modèle fraîchement téléchargé
                 if AppGroupManager.shared.selectedModel != tier {
                     AppGroupManager.shared.selectedModel = tier
-                } else {
-                    WhisperEngine.shared.loadModel(tier)
                 }
+                WhisperEngine.shared.loadModel(tier)
                 if !WhisperEngine.shared.isBackgroundEngineRunning {
                     WhisperEngine.shared.startBackgroundAudioEngine()
                 }
@@ -240,6 +277,7 @@ public final class ModelDownloader: NSObject, ObservableObject, URLSessionDownlo
                 self.downloadProgress.removeValue(forKey: tier)
                 self.downloadTasks.removeValue(forKey: tier)
                 self.taskToTierMap.removeValue(forKey: downloadTask.taskIdentifier)
+                self.endBackgroundProtectionIfIdle()
             }
         }
     }
@@ -256,11 +294,14 @@ public final class ModelDownloader: NSObject, ObservableObject, URLSessionDownlo
         guard let tier = tier(for: task) else { return }
 
         DispatchQueue.main.async {
+            if let resumeData = nsError.userInfo[NSURLSessionDownloadTaskResumeData] as? Data {
+                self.resumeDataByTier[tier] = resumeData
+            }
             self.errorMessage = "Échec du téléchargement (\(tier.displayName)) : \(error.localizedDescription)"
             self.activeDownloads.remove(tier)
-            self.downloadProgress.removeValue(forKey: tier)
             self.downloadTasks.removeValue(forKey: tier)
             self.taskToTierMap.removeValue(forKey: task.taskIdentifier)
+            self.endBackgroundProtectionIfIdle()
         }
     }
 }
